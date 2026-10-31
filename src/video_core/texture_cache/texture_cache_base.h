@@ -157,6 +157,9 @@ class TextureCache : public VideoCommon::ChannelSetupCaches<TextureCacheChannelI
     /// cards up to 8 GiB; larger ones 5/8 of the driver's budget (ApplyThresholdOverrides).
     static constexpr u64 MaxCriticalMemory = 5_GiB;
     static constexpr size_t GC_EMERGENCY_COUNTS = 2;
+    /// Switch 2 titles: images unused this long (frames) are dropped before memory gets tight.
+    static constexpr u64 STALE_IMAGE_FRAMES = 3 * 60 * 60;
+    static constexpr size_t STALE_DELETES_PER_FRAME = 8;
 
     using Runtime = typename P::Runtime;
     using Image = typename P::Image;
