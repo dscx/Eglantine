@@ -531,6 +531,7 @@ struct System::Impl {
         services.reset();
         service_manager.reset();
         fs_controller.Reset();
+        FileSys::SetLooseAOC({});
         cheat_engine.reset();
         core_timing.ClearPendingEvents();
         app_loader.reset();
@@ -723,6 +724,7 @@ void System::InitializeDebugger() {
 
 SystemResultStatus System::Load(Frontend::EmuWindow& emu_window, const std::string& filepath,
                                 Service::AM::FrontendAppletParameters& params) {
+    FileSys::SetLooseAOC({});
     return impl->Load(*this, emu_window, filepath, params);
 }
 
