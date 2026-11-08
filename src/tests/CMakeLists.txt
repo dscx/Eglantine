@@ -75,6 +75,7 @@ add_executable(tests
     video_core/virtual_range_cache.cpp
     video_core/ampere_lowering.cpp
     video_core/spirv_software_matrix.cpp
+    video_core/spirv_nan_safe_min_max.cpp
     video_core/ampere_geometry.cpp
     video_core/ampere_i2f.cpp
     video_core/ampere_gradient.cpp
