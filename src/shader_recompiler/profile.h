@@ -50,6 +50,7 @@ struct Profile {
     /// Native OpAtomicFAddEXT on 32-bit float storage buffer words
     bool support_float32_atomic_add{};
     bool support_shared_int64_atomics{};
+    bool support_image_int64_atomics{};
     bool support_derivative_control{};
     bool support_geometry_shader_passthrough{};
     bool support_native_ndc{};

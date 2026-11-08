@@ -527,6 +527,11 @@ void SetupCapabilities(const Profile& profile, const Info& info, EmitContext& ct
         ctx.AddExtension("SPV_EXT_shader_atomic_float_add");
         ctx.AddCapability(spv::Capability::AtomicFloat32AddEXT);
     }
+    if (info.uses_atomic_image_u64) {
+        ctx.AddExtension("SPV_EXT_shader_image_int64");
+        ctx.AddCapability(spv::Capability::Int64ImageEXT);
+        ctx.AddCapability(spv::Capability::Int64Atomics);
+    }
     if (info.uses_int64_bit_atomics && profile.support_int64_atomics) {
         ctx.AddCapability(spv::Capability::Int64Atomics);
     }
