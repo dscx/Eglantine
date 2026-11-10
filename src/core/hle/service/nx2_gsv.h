@@ -1982,9 +1982,37 @@ private:
     // next vblank instead (title 4 ran at up to 160 fps, its timing and audio with it).
     std::chrono::steady_clock::time_point m_next_vblank{};
     u32 m_swap_word{};
+    /// Swap interval the pacing follows, and the one the game keeps asking for instead
+    /// (SwapIntervalHysteresis).
+    u32 m_paced_interval{};
+    u32 m_pending_interval{};
+    u32 m_pending_presents{};
     Nx2OotTime::FrameDelta m_oot_frame_delta;
 
     /// Resolves the requested interval and existing title/debug overrides for both pacing paths.
+    /// Mario Kart World flips between one and two vblanks a frame several times a second as its
+    /// frame time crosses 16.7 ms (issue #278: 2,931 changes in 17 minutes). Honouring every flip
+    /// held some presents for two vblanks and let the next through at once: judder and audio
+    /// crackle. The pacing follows a new interval only once the game has asked for it this many
+    /// presents in a row.
+    static constexpr u32 SwapIntervalSettlePresents = 8;
+    u32 SwapIntervalHysteresis(u32 requested) {
+        if (m_paced_interval == 0 || requested == m_paced_interval) {
+            m_paced_interval = requested;
+            m_pending_presents = 0;
+            return m_paced_interval;
+        }
+        if (requested != m_pending_interval) {
+            m_pending_interval = requested;
+            m_pending_presents = 0;
+        }
+        if (++m_pending_presents >= SwapIntervalSettlePresents) {
+            m_paced_interval = requested;
+            m_pending_presents = 0;
+        }
+        return m_paced_interval;
+    }
+
     u32 SwapInterval(u32 timing) {
         static const u32 forced_interval = [] {
             const char* value = std::getenv("EDEN_NX2_SWAP_INTERVAL");
@@ -2025,7 +2053,7 @@ private:
             m_next_vblank = movie_now;
             return;
         }
-        const u32 swap_interval = SwapInterval(timing);
+        const u32 swap_interval = SwapIntervalHysteresis(SwapInterval(timing));
         const u32 refresh_rate = (timing & 0xffff) >= 30 && (timing & 0xffff) <= 240 ? timing & 0xffff : 60;
         if (timing != std::exchange(m_swap_word, timing)) {
             LOG_INFO(Service, "nx2:vi2 present #{} swap interval {} at {} Hz (word 12 = {:#x})",
