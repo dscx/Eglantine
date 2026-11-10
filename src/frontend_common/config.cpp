@@ -275,7 +275,25 @@ void Config::ReadDataStorageValues() {
     using namespace Common::FS;
 
     const auto setPath = [this](const EdenPath& path, const char* setting) {
-        SetEdenPath(path, ReadStringSetting(std::string(setting)));
+        std::string value = ReadStringSetting(std::string(setting));
+#ifndef __ANDROID__
+        // A config migrated from Eden keeps absolute paths into the old "eden" folder. When the
+        // migration moved that folder, the path no longer exists and the emulator would recreate
+        // an empty NAND there (issue #813): follow the data into the eglantine folder instead. A
+        // folder that still exists (linked, or kept on purpose) is left alone.
+        const std::filesystem::path legacy = GetLegacyPath(EmuPath::LegacyEdenDir);
+        const std::filesystem::path configured{value};
+        if (!value.empty() && !legacy.empty() && !FS::Exists(configured)) {
+            const auto relative = configured.lexically_relative(legacy);
+            if (!relative.empty() && relative.native().rfind("..", 0) != 0) {
+                const auto moved = GetEdenPath(EdenPath::EdenDir) / relative;
+                LOG_WARNING(Config, "{} pointed into the old eden folder ({}), using {}", setting,
+                            value, PathToUTF8String(moved));
+                value = PathToUTF8String(moved);
+            }
+        }
+#endif
+        SetEdenPath(path, value);
     };
 
     setPath(EdenPath::NANDDir, "nand_directory");
