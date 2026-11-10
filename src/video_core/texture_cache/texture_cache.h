@@ -2416,6 +2416,21 @@ ImageViewId TextureCache<P>::CreateImageView(const TICEntry& raw_config) {
     if (info.format == PixelFormat::Invalid) {
         return NULL_IMAGE_VIEW_ID;
     }
+    if (info.type != ImageType::Buffer &&
+        (info.size.width == 0 || info.size.height == 0 || info.size.depth == 0 ||
+         info.size.width > 65536 || info.size.height > 65536 || info.size.depth > 2048 ||
+         info.resources.layers <= 0 || info.resources.layers > 2048)) {
+        // A descriptor read from a command page the guest already refilled (issues #672, #743):
+        // the same bounds FindRenderTargetView applies, instead of a vkCreateImage that fails or
+        // a 2,275-layer image that takes the device down.
+        static u32 logged{};
+        if (logged++ < 16) {
+            LOG_ERROR(HW_GPU, "Rejected texture descriptor at {:#x}: {}x{}x{}, {} layers",
+                      config.Address(), info.size.width, info.size.height, info.size.depth,
+                      info.resources.layers);
+        }
+        return NULL_IMAGE_VIEW_ID;
+    }
     if (info.type == ImageType::Buffer) {
         const ImageViewInfo view_info(config, 0);
         return slot_image_views.insert(runtime, info, view_info, config.Address());
