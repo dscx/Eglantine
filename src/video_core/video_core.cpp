@@ -12,6 +12,7 @@
 #include "core/frontend/emu_window.h"
 #include "core/frontend/graphics_context.h"
 #include "video_core/host1x/gpu_device_memory_manager.h"
+#include "core/hle/kernel/k_process.h"
 #include "video_core/host1x/host1x.h"
 #include "video_core/renderer_base.h"
 #include "video_core/renderer_null/renderer_null.h"
@@ -30,6 +31,13 @@ std::unique_ptr<VideoCore::RendererBase> CreateRenderer(Core::System& system, Co
     case Settings::RendererBackend::OpenGL_GLSL:
     case Settings::RendererBackend::OpenGL_GLASM:
     case Settings::RendererBackend::OpenGL_SPIRV:
+        if (const auto* process = system.ApplicationProcess(); process && process->IsSwitch2()) {
+            // The OpenGL backends have none of the Switch 2 texture formats, tensor or task/mesh
+            // paths and overflow their texture limits on native shaders: a black screen and
+            // asserts (issue #711). Vulkan is the only backend that runs these titles.
+            LOG_ERROR(HW_GPU, "OpenGL cannot run Switch 2 titles; using Vulkan for this session");
+            return std::make_unique<Vulkan::RendererVulkan>(emu_window, device_memory, gpu, std::move(context));
+        }
         return std::make_unique<OpenGL::RendererOpenGL>(emu_window, device_memory, gpu, std::move(context));
 #endif
     case Settings::RendererBackend::Vulkan:
