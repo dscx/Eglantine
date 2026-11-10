@@ -276,7 +276,10 @@ PixelFormat PixelFormatFromTextureInfo(TextureFormat format, ComponentType red, 
         return PixelFormat::ASTC_2D_6X5_SRGB;
     }
     if (static_cast<int>(format) == 0) {
-        return PixelFormat::A8B8G8R8_UNORM;
+        // A null descriptor (Switch 2 titles leave unused TIC slots zeroed). Reading it as a real
+        // RGBA8 texture created an image at a garbage address and aborted later in the frame
+        // (issues #368, #321); the texture cache binds the null view for an invalid format.
+        return PixelFormat::Invalid;
     }
     UNIMPLEMENTED_MSG("texture format={} srgb={} components={{{} {} {} {}}}",
                       static_cast<int>(format), is_srgb, static_cast<int>(red),
