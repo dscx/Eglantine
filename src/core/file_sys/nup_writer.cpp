@@ -1784,6 +1784,20 @@ ExtractResult ExtractNup(const std::filesystem::path& archive, const std::filesy
         if (packages.empty()) {
             throw ExtractError(ExtractResult::InvalidSource, "NUP has no packages");
         }
+        // Every member carries its SHA-256 in the TOC. A damaged download used to extract
+        // without a word and the game then failed in odd places (issue #766): check the whole
+        // archive first, so a corrupt one writes nothing.
+        const auto integrity = nup.VerifyIntegrity([cancel](std::size_t, std::size_t) {
+            return cancel == nullptr || !cancel->load();
+        });
+        if (integrity != Loader::ResultStatus::Success) {
+            if (cancel && cancel->load()) {
+                throw ExtractError(ExtractResult::Cancelled, "cancelled");
+            }
+            throw ExtractError(ExtractResult::InvalidSource,
+                               "integrity check failed: a member of " + ToUtf8(archive) +
+                                   " does not match its SHA-256 (see the log)");
+        }
 
         const bool bare =
             packages.size() == 1 && packages[0].kind == FileSys::NupContainer::PackageKind::Base;

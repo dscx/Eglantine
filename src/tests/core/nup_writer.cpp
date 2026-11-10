@@ -596,6 +596,40 @@ TEST_CASE("NUP extracts a full dump and repacks it", "[nup]") {
     REQUIRE(copy.VerifyIntegrity({}) == Loader::ResultStatus::Success);
 }
 
+TEST_CASE("NUP extract refuses an archive whose member data was changed", "[nup]") {
+    TempDir t;
+    const auto root = t.path / "Game";
+    MakeDump(root);
+    const auto archive = t.path / "Game.nup";
+    REQUIRE(FileSys::Nup::PackDump(root, archive) == FileSys::Nup::PackResult::Success);
+
+    // Flip one byte in the middle of the member data (the super block and the TOC are at the
+    // ends), as a truncated or bit-rotted download would.
+    {
+        std::fstream f{archive, std::ios::in | std::ios::out | std::ios::binary};
+        REQUIRE(f.is_open());
+        f.seekg(0, std::ios::end);
+        const auto size = static_cast<std::streamoff>(f.tellg());
+        REQUIRE(size > 0x2000);
+        const std::streamoff at = 0x1000 + (size - 0x1000) / 2;
+        f.seekg(at);
+        char byte{};
+        f.read(&byte, 1);
+        byte = static_cast<char>(byte ^ 0x5a);
+        f.seekp(at);
+        f.write(&byte, 1);
+    }
+
+    const auto out = t.path / "Extracted";
+    std::string error;
+    REQUIRE(FileSys::Nup::ExtractNup(archive, out, {}, nullptr, &error) ==
+            FileSys::Nup::ExtractResult::InvalidSource);
+    INFO(error);
+    REQUIRE_FALSE(error.empty());
+    // Nothing was written: the output it created is removed again.
+    REQUIRE_FALSE(fs::exists(out));
+}
+
 TEST_CASE("NUP extracts a bare dump without a base wrapper", "[nup]") {
     TempDir t;
     const auto root = t.path / "Game";
