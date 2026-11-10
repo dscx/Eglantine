@@ -167,6 +167,10 @@ std::unique_ptr<TranslationMap> InitializeTranslations(QObject* parent) {
               "Performance, Balanced, Quality, or DLAA (native resolution anti-aliasing).\n"
               "In Ocarina of Time, DLAA renders 3D at full 1440p (Docked), while Quality, "
               "Balanced, and Performance upscale from 1080p to 1440p."));
+    INSERT(Settings, game_dlss_network, tr("Use the game's own DLSS network"),
+           tr("Runs a Switch 2 game's own DLSS upscaler (Fire Emblem: Fortune's Weave) on NVIDIA "
+              "GPUs with cooperative matrices. Off, or on other GPUs, AMD FSR 3.1 draws in its "
+              "place."));
     INSERT(Settings, anti_aliasing, tr("Anti-Aliasing Method:"),
            tr("The anti-aliasing method to use.\nSMAA offers the best quality.\nFXAA "
               "can produce a more stable picture in lower resolutions."));

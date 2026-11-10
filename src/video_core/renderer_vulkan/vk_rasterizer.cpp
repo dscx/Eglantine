@@ -2505,6 +2505,15 @@ bool RasterizerVulkan::SupportsGameDlssNetwork() const {
     return device.IsGuestWarpSizeSupported(VK_SHADER_STAGE_COMPUTE_BIT);
 }
 
+bool RasterizerVulkan::GameDlssNetworkHostSupported() const {
+    // EDEN_NX2_GAME_DLSS_ANY_GPU=1: try the network on any driver that has cooperative matrices.
+    static const bool any_gpu = std::getenv("EDEN_NX2_GAME_DLSS_ANY_GPU") != nullptr;
+    if (!device.IsCooperativeHmmaSupported() || device.IsMoltenVK()) {
+        return false;
+    }
+    return any_gpu || device.GetDriverID() == VK_DRIVER_ID_NVIDIA_PROPRIETARY;
+}
+
 std::optional<VideoCore::GameDlssProbe> RasterizerVulkan::ProbeGameDlssOutput(
     const Tegra::Engines::Fermi2D::Surface& src, const Tegra::Engines::Fermi2D::Surface& dst) {
     std::scoped_lock lock{texture_cache.mutex};

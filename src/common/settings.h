@@ -395,6 +395,10 @@ struct Values {
                                                        Specialization::Default,
                                                        true,
                                                        true};
+    // A Switch 2 game's own DLSS network (its translated programs) in place of the FSR 3.1
+    // replacement, where the host can run it. Off keeps the replacement.
+    SwitchableSetting<bool> game_dlss_network{linkage, true, "game_dlss_network",
+                                              Category::Renderer};
     SwitchableSetting<AspectRatio, true> aspect_ratio{linkage,
                                                       AspectRatio::R16_9,
                                                       "aspect_ratio",

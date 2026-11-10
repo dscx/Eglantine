@@ -902,14 +902,15 @@ constexpr u32 DLSS_CHECK_MISMATCH_PERCENT = 3;
 // The game's own DLSS network (its translated programs) is shown once every pass of an
 // evaluation has run several times in a row and its output has passed several health checks in
 // a row. Until then, when any pass can't run, and for the rest of the session once the network
-// fails its checks, the replacement upscale draws over the output pass's result. NVIDIA DLSS on
-// or EDEN_NX2_DLSS_REPLACEMENT=fsr|standin keep the replacement. The network's image sizes are
-// fixed by the game, so it is used only without resolution scaling; its matrix multiplies need
-// shaders 32 threads wide.
+// fails its checks, the replacement upscale draws over the output pass's result. The setting
+// "Use the game's own DLSS network" off, NVIDIA DLSS on or EDEN_NX2_DLSS_REPLACEMENT=fsr|standin
+// keep the replacement. The network's image sizes are fixed by the game, so it is used only
+// without resolution scaling; its matrix multiplies need shaders 32 threads wide and hardware
+// cooperative matrices on a driver it is known to work on (GameDlssNetworkHostSupported).
 VideoCore::GameDlssReason KeplerCompute::GameDlssBlocker() const {
     using VideoCore::GameDlssReason;
     static const bool forced_replacement = std::getenv("EDEN_NX2_DLSS_REPLACEMENT") != nullptr;
-    if (forced_replacement) {
+    if (forced_replacement || !Settings::values.game_dlss_network.GetValue()) {
         return GameDlssReason::TurnedOff;
     }
     // NVIDIA DLSS, when turned on and running, comes first.
@@ -920,7 +921,7 @@ VideoCore::GameDlssReason KeplerCompute::GameDlssBlocker() const {
     if (scale.up_scale != 1 || scale.down_shift != 0) {
         return GameDlssReason::ResolutionScaling;
     }
-    if (!rasterizer->SupportsGameDlssNetwork()) {
+    if (!rasterizer->SupportsGameDlssNetwork() || !rasterizer->GameDlssNetworkHostSupported()) {
         return GameDlssReason::Unsupported;
     }
     return GameDlssReason::None;

@@ -227,6 +227,13 @@ public:
         return false;
     }
 
+    /// Whether this host should run a game's DLSS network at all: hardware cooperative matrices
+    /// for its HMMA (software emulation runs at 3 fps, issue #595) on a driver it is known to
+    /// work on (it lost the device on AMD and MoltenVK hosts, issues #509, #581).
+    [[nodiscard]] virtual bool GameDlssNetworkHostSupported() const {
+        return false;
+    }
+
     /// Whether NVIDIA DLSS (the "Use NVIDIA DLSS" setting) would draw a game's DLSS evaluation.
     [[nodiscard]] virtual bool UsesNvidiaDlss() const {
         return false;
