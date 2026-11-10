@@ -458,6 +458,14 @@ MainWindow::MainWindow(bool has_broken_vulkan)
 
     setAcceptDrops(true);
     ui->setupUi(this);
+#ifdef __unix__
+    // On Wayland the menu bar is exported to the desktop's global menu, which KDE Plasma does
+    // not show for this window: no File/Emulation/View menus at all (issue #748). Keep it in the
+    // window.
+    if (QGuiApplication::platformName().startsWith(QStringLiteral("wayland"))) {
+        menuBar()->setNativeMenuBar(false);
+    }
+#endif
     statusBar()->hide();
 
     startup_icon_theme = QIcon::themeName();
