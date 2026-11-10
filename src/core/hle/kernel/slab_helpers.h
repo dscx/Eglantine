@@ -154,6 +154,12 @@ public:
             kernel.ObjectListContainer().Unregister(this);
             arg = this->GetPostDestroyArgument();
             this->Finalize(kernel);
+        } else if (this->is_linked()) {
+            // Registered but never initialized (a process whose program failed to load, for
+            // instance). Freeing it while it is still in the object list leaves a dangling tree
+            // node; the next object allocated at this address inherits it, its own Register()
+            // silently finds the stale node and its Unregister() crashes.
+            kernel.ObjectListContainer().Unregister(this);
         }
         Free(kernel, static_cast<Derived*>(this));
         if (is_initialized) {

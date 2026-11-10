@@ -19,7 +19,6 @@ bool Process::Initialize(Loader::AppLoader& loader, Loader::ResultStatus& out_lo
 
     // Create the process.
     auto* const process = Kernel::KProcess::Create(m_system.Kernel());
-    Kernel::KProcess::Register(m_system.Kernel(), process);
 
     // On exit, ensure we free the additional reference to the process.
     SCOPE_EXIT {
@@ -32,8 +31,14 @@ bool Process::Initialize(Loader::AppLoader& loader, Loader::ResultStatus& out_lo
 
     // Ensure loading was successful.
     if (load_result != Loader::ResultStatus::Success) {
+        // The process never got initialized, so the Close() above frees it without
+        // unregistering: registering it before this point would leave a dangling node in the
+        // kernel's object list (see KAutoObjectWithSlabHeapAndContainer::Destroy).
         return false;
     }
+
+    // Register the process now that it is initialized.
+    Kernel::KProcess::Register(m_system.Kernel(), process);
 
     // TODO: remove this, kernel already tracks this
     m_system.Kernel().AppendNewProcess(process);
