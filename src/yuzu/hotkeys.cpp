@@ -39,9 +39,10 @@ void HotkeyRegistry::LoadHotkeys() {
                                                  QKeySequence::NativeText);
             hk.context = static_cast<Qt::ShortcutContext>(shortcut.shortcut.context);
         }
-        if (!shortcut.shortcut.controller_keyseq.empty()) {
-            hk.controller_keyseq = shortcut.shortcut.controller_keyseq;
-        }
+        // An empty controller sequence is a cleared shortcut (the config stores it with
+        // default=false), not a missing one: keeping the default here re-armed the Plus/Minus
+        // combos on every launch (issue #669).
+        hk.controller_keyseq = shortcut.shortcut.controller_keyseq;
         if (hk.shortcut) {
             hk.shortcut->disconnect();
             hk.shortcut->setKey(hk.keyseq);
