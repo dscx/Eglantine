@@ -1779,6 +1779,7 @@ void MainWindow::OnPrepareForSleep(bool prepare_sleep) {
             OnPauseGame();
         }
     } else {
+        Common::g_wall_clock.OnSystemResume();
         if (!QtCommon::emu_thread->IsRunning() && auto_paused) {
             auto_paused = false;
             OnStartGame();

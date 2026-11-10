@@ -243,6 +243,19 @@ const CPUCaps g_cpu_caps = [] {
 #endif
 
 #if defined(ARCHITECTURE_x86_64)
+namespace {
+// Added to every TSC read; see WallClock::OnSystemResume.
+constinit std::atomic<s64> tsc_resume_offset{0};
+constinit s64 tsc_at_start{0};
+constinit s64 steady_ns_at_start{0};
+
+[[nodiscard]] s64 SteadyNs() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+} // Anonymous namespace
+
 WallClock::WallClock(bool invariant_, u64 rdtsc_frequency_) noexcept
     : rdtsc_frequency{rdtsc_frequency_}
     , ns_rdtsc_factor{invariant_ ? GetFixedPoint64Factor(NsRatio::den, rdtsc_frequency_) : 0}
@@ -254,7 +267,12 @@ WallClock::WallClock(bool invariant_, u64 rdtsc_frequency_) noexcept
     , gputick_rdtsc_factor{invariant_ ? GetFixedPoint64Factor(GPUTickFreq, rdtsc_frequency_) : 0}
     , base_rdtsc{invariant_ ? Common::X64::FencedRDTSC() : 0}
     , invariant{invariant_}
-{}
+{
+    if (invariant) {
+        tsc_at_start = s64(base_rdtsc);
+        steady_ns_at_start = SteadyNs();
+    }
+}
 
 std::chrono::nanoseconds WallClock::GetTimeNS() const {
     if (!invariant)
@@ -330,7 +348,24 @@ s64 WallClock::GetUptime() const {
                    std::chrono::steady_clock::now().time_since_epoch())
             .count();
     }
-    return static_cast<s64>(Common::X64::FencedRDTSC() - base_rdtsc);
+    return static_cast<s64>(Common::X64::FencedRDTSC() - base_rdtsc) +
+           tsc_resume_offset.load(std::memory_order_relaxed);
+}
+
+void WallClock::OnSystemResume() {
+    if (!invariant) {
+        return;
+    }
+    // The steady clock does not count suspended time, so this is where the TSC would be had
+    // the machine not slept. A TSC that kept running (s2idle) is ahead of it and left alone.
+    const s64 expected = s64(MultiplyAndDivide64(u64(SteadyNs() - steady_ns_at_start),
+                                                 rdtsc_frequency, NsRatio::den));
+    const s64 behind = expected - GetUptime();
+    if (behind > s64(rdtsc_frequency)) {
+        tsc_resume_offset.fetch_add(behind, std::memory_order_relaxed);
+        LOG_INFO(Common, "TSC restarted during sleep: continuing the clock {} s ahead",
+                 behind / s64(rdtsc_frequency));
+    }
 }
 
 bool WallClock::IsNative() const {
@@ -465,6 +500,10 @@ bool WallClock::IsNative() const {
 u64 WallClock::NsToTicks(std::chrono::nanoseconds ns) const {
     return ns.count();
 }
+#endif
+
+#if !defined(ARCHITECTURE_x86_64)
+void WallClock::OnSystemResume() {}
 #endif
 
 u64 WallClock::CPUTickToGuestCNTPCT(u64 cpu_tick) const {

@@ -57,6 +57,11 @@ public:
     /// @returns The raw host timer ticks since an indeterminate epoch.
     s64 GetUptime() const;
 
+    /// Call when the host wakes from sleep. S3 restarts the TSC on some CPUs (Zen 4), which sent
+    /// the clock back to near zero: every pending guest timer then waited for the time since the
+    /// previous wake to pass again. Continues the clock from where it stopped.
+    void OnSystemResume();
+
     /// @returns Whether the clock directly uses the host's hardware clock.
     bool IsNative() const;
 
