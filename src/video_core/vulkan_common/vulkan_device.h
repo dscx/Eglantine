@@ -230,6 +230,13 @@ enum class NvidiaArchitecture {
 };
 
 /// Handles data specific to a physical device.
+/// Whether VK_EXT_mesh_shader is used when the device offers it. RADV's mesh pipelines hang the
+/// GPU on RDNA 3/4 in Mario Kart World (issues #266, #341, #404), so Mesa RADV takes the compute
+/// task/mesh fallback unless the user opts in (EDEN_NX2_RADV_MESH=1).
+[[nodiscard]] constexpr bool MeshShadersDefaultOn(VkDriverId driver_id, bool radv_opt_in) {
+    return driver_id != VK_DRIVER_ID_MESA_RADV || radv_opt_in;
+}
+
 class Device {
 public:
     explicit Device(VkInstance instance, vk::PhysicalDevice physical, VkSurfaceKHR surface,

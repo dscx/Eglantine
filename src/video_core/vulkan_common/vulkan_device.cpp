@@ -1627,6 +1627,14 @@ void Device::RemoveUnsuitableExtensions() {
         LOG_WARNING(Render_Vulkan, "EDEN_NX2_FORCE_MESH_FALLBACK: VK_EXT_mesh_shader disabled");
         extensions.mesh_shader = false;
     }
+    if (extensions.mesh_shader &&
+        !MeshShadersDefaultOn(properties.driver.driverID, std::getenv("EDEN_NX2_RADV_MESH") != nullptr)) {
+        LOG_WARNING(Render_Vulkan,
+                    "RADV: VK_EXT_mesh_shader left disabled (its mesh pipelines hang the GPU in Mario "
+                    "Kart World); task/mesh draws take the compute fallback. EDEN_NX2_RADV_MESH=1 "
+                    "enables it");
+        extensions.mesh_shader = false;
+    }
     RemoveExtensionFeatureIfUnsuitable(extensions.mesh_shader, features.mesh_shader,
                                        VK_EXT_MESH_SHADER_EXTENSION_NAME);
 
