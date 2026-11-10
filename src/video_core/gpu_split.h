@@ -414,8 +414,8 @@ private:
     bool front_macros{};
     std::unique_ptr<u64[]> ring;
 
-    // Front side.
-    u64 write_position{};
+    // Front side. Own 128-byte block, apart from the fields above that the back reads.
+    alignas(128) u64 write_position{};
     u64 last_writer_position{};
     u64 last_sync_position{};
     u64 last_function_position{};
@@ -443,8 +443,11 @@ private:
     size_t publish_every{PublishEvery};
     Tegra::Engines::EngineInterface* front_engine{};
 
-    // Back side.
-    Tegra::Engines::EngineInterface* back_engine{};
+    // Back side. Starts its own 128-byte block (x86 prefetchers pull 64-byte lines in pairs):
+    // back_engine is written by the back on every engine switch and shared a block with the
+    // front's ring position (consumed_cache, published_local), so the front missed the cache on
+    // almost every ring write.
+    alignas(128) Tegra::Engines::EngineInterface* back_engine{};
     /// VerifyRepeat: the last entry's word, the Repeatable entries seen and those that did not
     /// follow the same word, since the last report
     u64 verify_previous{};
