@@ -156,8 +156,12 @@ AppLoader_NUP::AppLoader_NUP(FileSys::VirtualFile file_)
     meta.publisher = program.publisher;
     meta.icon = program.icon;
     meta.localized_icons = program.localized_icons;
+    meta.nacp = program.nacp;
     if (base_index && *base_index != *program_index) {
         const auto& base = nup->GetPackages()[*base_index];
+        if (!base.nacp.empty()) {
+            meta.nacp = base.nacp;
+        }
         if (!base.title_name.empty()) {
             meta.title_name = base.title_name;
         }
@@ -195,8 +199,8 @@ AppLoader_NUP::AppLoader_NUP(FileSys::VirtualFile file_)
                                                           : program.display_version;
     }
     nacp_file = BuildNacp(meta, display_version);
-    if (!program.nacp.empty()) {
-        title_override = program.title_name;
+    if (!meta.nacp.empty()) {
+        title_override = meta.title_name;
     }
     if (!meta.icon.empty()) {
         icon_file = std::make_shared<FileSys::VectorVfsFile>(meta.icon, "icon.dat");

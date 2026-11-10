@@ -603,21 +603,33 @@ TEST_CASE("NUP extract refuses an archive whose member data was changed", "[nup]
     const auto archive = t.path / "Game.nup";
     REQUIRE(FileSys::Nup::PackDump(root, archive) == FileSys::Nup::PackResult::Success);
 
-    // Flip one byte in the middle of the member data (the super block and the TOC are at the
-    // ends), as a truncated or bit-rotted download would.
-    {
+    // Flip one byte of member data, as a bit-rotted download would. The archive still parses
+    // (the TOC and super block are intact) but a member no longer matches its hash; the first
+    // offset that gives that is used (the test archive is only a few KiB).
+    FileSys::RealVfsFilesystem real;
+    bool corrupted = false;
+    for (std::streamoff at = 0x40; !corrupted; at += 0x8) {
         std::fstream f{archive, std::ios::in | std::ios::out | std::ios::binary};
         REQUIRE(f.is_open());
         f.seekg(0, std::ios::end);
         const auto size = static_cast<std::streamoff>(f.tellg());
-        REQUIRE(size > 0x2000);
-        const std::streamoff at = 0x1000 + (size - 0x1000) / 2;
+        REQUIRE(at < size);
         f.seekg(at);
         char byte{};
         f.read(&byte, 1);
-        byte = static_cast<char>(byte ^ 0x5a);
+        const char flipped = static_cast<char>(byte ^ 0x5a);
         f.seekp(at);
-        f.write(&byte, 1);
+        f.write(&flipped, 1);
+        f.close();
+        FileSys::NupContainer probe{real.OpenFile(archive.string(), FileSys::OpenMode::Read)};
+        if (probe.GetStatus() == Loader::ResultStatus::Success &&
+            probe.VerifyIntegrity({}) != Loader::ResultStatus::Success) {
+            corrupted = true;
+            break;
+        }
+        std::fstream restore{archive, std::ios::in | std::ios::out | std::ios::binary};
+        restore.seekp(at);
+        restore.write(&byte, 1);
     }
 
     const auto out = t.path / "Extracted";
