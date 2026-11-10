@@ -233,7 +233,7 @@ bool Puller::PollAcquire(DmaPusher& dma_pusher) {
         const auto device = dma_pusher.memory_manager.GpuToCpuAddress(pending_acquire->address);
         if (device) {
             dma_pusher.memory_manager.Write<u32>(pending_acquire->address, pending_acquire->value);
-            Nx2SemaphoreWaiters::Get().OnWrite(*device, pending_acquire->value, "ring-rescue");
+            Nx2SemaphoreWaiters::Get().OnWrite(*device, pending_acquire->value);
             LOG_INFO(HW_GPU,
                      "Channel {} acquire satisfied by ring rescue: semaphore {:#x} advanced "
                      "{:#x} -> {:#x}",
