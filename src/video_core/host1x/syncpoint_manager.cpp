@@ -4,6 +4,7 @@
 // SPDX-FileCopyrightText: 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "common/logging.h"
 #include "video_core/host1x/syncpoint_manager.h"
 
 namespace Tegra {
@@ -57,19 +58,46 @@ void SyncpointManager::DeregisterHostAction(u32 syncpoint_id, const ActionHandle
     DeregisterAction(host_action_storage[syncpoint_id], handle);
 }
 
+// Ids come straight from GPU commands, which are garbage when the guest refilled a command page
+// before the GPU read it (Mario Kart World, issue #74): an out-of-range id indexed past the
+// syncpoint arrays and crashed in Increment.
+static bool ValidSyncpoint(u32 syncpoint_id) {
+    if (syncpoint_id < SyncpointManager::NUM_MAX_SYNCPOINTS) {
+        return true;
+    }
+    static u32 logged{};
+    if (logged++ < 16) {
+        LOG_ERROR(HW_GPU, "Ignoring syncpoint {:#x}: past the {} syncpoints", syncpoint_id,
+                  SyncpointManager::NUM_MAX_SYNCPOINTS);
+    }
+    return false;
+}
+
 void SyncpointManager::IncrementGuest(u32 syncpoint_id) {
+    if (!ValidSyncpoint(syncpoint_id)) {
+        return;
+    }
     Increment(syncpoints_guest[syncpoint_id], wait_guest_cv, guest_action_storage[syncpoint_id]);
 }
 
 void SyncpointManager::IncrementHost(u32 syncpoint_id) {
+    if (!ValidSyncpoint(syncpoint_id)) {
+        return;
+    }
     Increment(syncpoints_host[syncpoint_id], wait_host_cv, host_action_storage[syncpoint_id]);
 }
 
 void SyncpointManager::WaitGuest(u32 syncpoint_id, u32 expected_value) {
+    if (!ValidSyncpoint(syncpoint_id)) {
+        return;
+    }
     Wait(syncpoints_guest[syncpoint_id], wait_guest_cv, expected_value);
 }
 
 void SyncpointManager::WaitHost(u32 syncpoint_id, u32 expected_value) {
+    if (!ValidSyncpoint(syncpoint_id)) {
+        return;
+    }
     Wait(syncpoints_host[syncpoint_id], wait_host_cv, expected_value);
 }
 
