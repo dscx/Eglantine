@@ -10,6 +10,7 @@
 #include "common/settings.h"
 #include "common/thread.h"
 #include "core/core.h"
+#include "core/hle/kernel/k_process.h"
 #include "core/core_timing.h"
 #include "core/hle/service/vi/conductor.h"
 #include "core/hle/service/vi/container.h"
@@ -117,8 +118,14 @@ s64 Conductor::GetNextTicks() const {
     speed_scale /= m_compose_speed_scale;
 
     if (m_system.GetNVDECActive() && settings.use_video_framerate.GetValue()) {
-        // Run at intended presentation rate during video playback.
-        speed_scale = 1.f;
+        // Run at intended presentation rate during video playback. Switch 2 titles decode their
+        // movies through nx2:vdecsvc and pace them in the present (PaceToVblank); pinning the
+        // vblank here on top of that made Fire Emblem: Fortune's Weave show the background
+        // between frames while a movie played (issue #290).
+        const auto* process = m_system.ApplicationProcess();
+        if (process == nullptr || !process->IsSwitch2()) {
+            speed_scale = 1.f;
+        }
     }
 
     const f32 effective_fps = 60.f / static_cast<f32>(m_swap_interval);
