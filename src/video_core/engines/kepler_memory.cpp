@@ -36,7 +36,15 @@ void KeplerMemory::ConsumeSinkImpl(Core::System& system) {
 }
 
 void KeplerMemory::CallMethod(Core::System& system, u32 method, u32 method_argument, bool is_last_call) {
-    ASSERT_MSG(method < Regs::NUM_REGS, "Invalid KeplerMemory register, increase the size of the Regs structure");
+    if (method >= Regs::NUM_REGS) {
+        // Garbage from a command list the guest refilled before the GPU read it (issue #369):
+        // ignore it rather than write past the register file.
+        static u32 logged{};
+        if (logged++ < 16) {
+            LOG_ERROR(HW_GPU, "Ignoring KeplerMemory method {:#x} past the register file", method);
+        }
+        return;
+    }
 
     regs.reg_array[method] = method_argument;
 
