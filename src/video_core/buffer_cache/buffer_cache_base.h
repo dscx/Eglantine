@@ -54,11 +54,17 @@ using BufferId = Common::SlotId;
 using VideoCore::Surface::PixelFormat;
 using namespace Common::Literals;
 
+/// Vertex streams the guest can set up (Maxwell3D::Regs::NumVertexArrays); the tracking arrays
+/// are this wide on every host.
+constexpr u32 NUM_VERTEX_ARRAYS = 32;
+/// Vertex buffers the host binds. MoltenVK misbehaves past 16, so Apple hosts bind the first 16
+/// streams only; the others are tracked but never bound.
 #ifdef __APPLE__
 constexpr u32 NUM_VERTEX_BUFFERS = 16;
 #else
 constexpr u32 NUM_VERTEX_BUFFERS = 32;
 #endif
+static_assert(NUM_VERTEX_BUFFERS <= NUM_VERTEX_ARRAYS);
 constexpr u32 NUM_TRANSFORM_FEEDBACK_BUFFERS = 4;
 constexpr u32 NUM_GRAPHICS_UNIFORM_BUFFERS = 18;
 constexpr u32 NUM_COMPUTE_UNIFORM_BUFFERS = 8;
@@ -141,7 +147,7 @@ public:
     BufferCacheChannelInfo& operator=(const BufferCacheChannelInfo&) = delete;
 
     Binding index_buffer;
-    std::array<Binding, NUM_VERTEX_BUFFERS> vertex_buffers;
+    std::array<Binding, NUM_VERTEX_ARRAYS> vertex_buffers;
     std::array<std::array<Binding, NUM_GRAPHICS_UNIFORM_BUFFERS>, NUM_STAGES> uniform_buffers;
     std::array<std::array<Binding, NUM_STORAGE_BUFFERS>, NUM_STAGES> storage_buffers;
     std::array<std::array<TextureBufferBinding, NUM_TEXTURE_BUFFERS>, NUM_STAGES> texture_buffers;
@@ -827,7 +833,7 @@ private:
     u32 enabled_vertex_buffers_mask = 0;
     u32 stale_vertex_buffers_mask = 0;
     u64 vertex_buffers_serial = 0;
-    std::array<Binding, 32> v_buffer{};
+    std::array<Binding, NUM_VERTEX_ARRAYS> v_buffer{};
 
     boost::container::small_vector<BufferCopy, 4> upload_copies;
 

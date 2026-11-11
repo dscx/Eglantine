@@ -1304,13 +1304,13 @@ void BufferCache<P>::BindHostVertexBuffer(u32 index, Buffer& buffer, u32 offset,
 
 template <class P>
 Binding& BufferCache<P>::VertexBufferSlot(u32 index) {
-    ASSERT(index < NUM_VERTEX_BUFFERS);
+    ASSERT(index < NUM_VERTEX_ARRAYS);
     return v_buffer[index];
 }
 
 template <class P>
 const Binding& BufferCache<P>::VertexBufferSlot(u32 index) const {
-    ASSERT(index < NUM_VERTEX_BUFFERS);
+    ASSERT(index < NUM_VERTEX_ARRAYS);
     return v_buffer[index];
 }
 
@@ -2174,6 +2174,19 @@ void BufferCache<P>::UpdateVertexBuffers() {
 template <class P>
 void BufferCache<P>::UpdateVertexBuffer(u32 index) {
     if (!maxwell3d->dirty.flags[Dirty::VertexBuffer0 + index]) {
+        return;
+    }
+    if (index >= NUM_VERTEX_BUFFERS) {
+        // A stream this host never binds (Apple: 16 of the 32). It used to be written into a
+        // 16-entry array anyway, which corrupted the channel state behind it on every update.
+        maxwell3d->dirty.flags[Dirty::VertexBuffer0 + index] = false;
+        if (maxwell3d->regs.vertex_streams[index].enable != 0) {
+            static u32 logged{};
+            if (logged++ < 4) {
+                LOG_WARNING(HW_GPU, "Vertex stream {} is enabled but this host binds only {}",
+                            index, NUM_VERTEX_BUFFERS);
+            }
+        }
         return;
     }
     const auto& array = maxwell3d->regs.vertex_streams[index];
