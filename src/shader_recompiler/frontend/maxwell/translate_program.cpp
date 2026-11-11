@@ -620,4 +620,23 @@ IR::Program GenerateGeometryPassthrough(ObjectPool<IR::Inst>& inst_pool,
     return program;
 }
 
+bool IsPureGeometryPassthrough(const Shader::IR::Program& program) {
+    if (!program.is_geometry_passthrough || program.invocations > 1) {
+        return false;
+    }
+    const Info& info{program.info};
+    if (info.stores_global_memory) {
+        return false;
+    }
+    const auto writes{[](const auto& descriptors) {
+        return std::ranges::any_of(descriptors, [](const auto& desc) { return desc.is_written; });
+    }};
+    if (writes(info.storage_buffers_descriptors) || writes(info.image_buffer_descriptors) ||
+        writes(info.image_descriptors)) {
+        return false;
+    }
+    // The lowered program stores the passthrough attributes; anything else is the body's.
+    return (info.stores.mask & ~info.passthrough.mask).none();
+}
+
 } // namespace Shader::Maxwell

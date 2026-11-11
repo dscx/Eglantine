@@ -23,6 +23,7 @@ add_executable(tests
     video_core/spirv_storage_alignment.cpp
     video_core/spirv_fragment_shuffle.cpp
     video_core/mesh_fallback.cpp
+    video_core/geometry_passthrough.cpp
     video_core/radv_mesh_default.cpp
     video_core/spirv_software_matrix.cpp
     common/bit_field.cpp

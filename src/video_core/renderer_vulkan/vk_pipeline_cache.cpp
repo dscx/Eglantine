@@ -2103,6 +2103,7 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
     // Layer passthrough generation for devices without VK_EXT_shader_viewport_index_layer
     Shader::IR::Program* layer_source_program{};
     bool mesh_unsupported{};
+    bool dropped_geometry{};
 
     std::optional<PhaseTimer> translate_timer{std::in_place, BuildPhase::Translate, build_in_parallel};
     for (size_t index = 0; index < Maxwell::MaxShaderProgram; ++index) {
@@ -2119,18 +2120,6 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         }
         Shader::Environment& env{*envs[env_index]};
         ++env_index;
-
-        if (index == static_cast<size_t>(Maxwell::ShaderType::Geometry) &&
-            !device.IsGeometryShaderSupported() &&
-            (native_turing || env.IsNativeProgram())) {
-            // A native (Switch 2) geometry program on a device without geometry shaders: the
-            // pipeline cannot run it, so its draws are skipped.
-            static std::atomic<bool> logged{};
-            if (!logged.exchange(true)) {
-                LOG_WARNING(Render_Vulkan, "Skipping native geometry shader pipelines: the device has no geometry shaders");
-            }
-            return nullptr;
-        }
 
         // Without VK_EXT_mesh_shader the driver cannot build a task/mesh pipeline; the draw is
         // skipped (see the pipeline check in the rasterizer). The stages are still translated
@@ -2163,6 +2152,32 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         if (device.GetDriverID() != VK_DRIVER_ID_NVIDIA_PROPRIETARY && Shader::Optimization::HasBrokenPattern(programs[index])) {
             LOG_WARNING(Render_Vulkan, "0x{:016x}: Skipping shader with known issues", key.unique_hashes[index]);
             return nullptr;
+        }
+
+        if (index == static_cast<size_t>(Maxwell::ShaderType::Geometry) &&
+            !device.IsGeometryShaderSupported()) {
+            // No geometry shaders on this device (MoltenVK). A passthrough program whose body
+            // stores nothing of its own only forwards the vertex stage's outputs, so the
+            // pipeline runs without it: Donkey Kong Bananza draws its walls through such
+            // programs (#651). Any other native (Switch 2) geometry program cannot run, so its
+            // draws are skipped.
+            if (Shader::Maxwell::IsPureGeometryPassthrough(programs[index])) {
+                dropped_geometry = true;
+                static std::atomic<bool> logged{};
+                if (!logged.exchange(true)) {
+                    LOG_WARNING(Render_Vulkan, "Dropping passthrough geometry programs: the "
+                                               "device has no geometry shaders");
+                }
+                continue;
+            }
+            if (native_turing || env.IsNativeProgram()) {
+                static std::atomic<bool> logged{};
+                if (!logged.exchange(true)) {
+                    LOG_WARNING(Render_Vulkan, "Skipping native geometry shader pipelines: the "
+                                               "device has no geometry shaders");
+                }
+                return nullptr;
+            }
         }
 
         if (Settings::values.dump_guest_shaders) {
@@ -2356,6 +2371,9 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         const bool is_emulated_stage = layer_source_program != nullptr &&
                                        index == static_cast<u32>(Maxwell::ShaderType::Geometry);
         if (key.unique_hashes[index] == 0 && !is_emulated_stage) {
+            continue;
+        }
+        if (dropped_geometry && index == static_cast<u32>(Maxwell::ShaderType::Geometry)) {
             continue;
         }
         UNIMPLEMENTED_IF(index == 0);

@@ -38,4 +38,9 @@ void ConvertLegacyToGeneric(IR::Program& program, const RuntimeInfo& runtime_inf
                                                       IR::Program& source_program,
                                                       Shader::OutputTopology output_topology);
 
+/// A passthrough geometry program whose body stores no attribute of its own and writes no
+/// memory: a pipeline without it sends the vertex stage's outputs to the fragment stage
+/// unchanged, which is how hosts without geometry shaders run it.
+[[nodiscard]] bool IsPureGeometryPassthrough(const IR::Program& program);
+
 } // namespace Shader::Maxwell
