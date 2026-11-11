@@ -533,6 +533,15 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
     CollectPhysicalMemoryInfo();
     CollectToolingInfo();
 
+    if (is_mvk) {
+        // MoltenVK cannot alias descriptors inside Metal argument buffers; the aliased bindings
+        // fall back to direct Metal slots, and a fragment shader with more than 16 samplers or
+        // a compute shader with more than 31 buffers then fails to compile
+        // ('sampler'/'buffer' attribute parameter is out of bounds): Ocarina of Time's
+        // vegetation drew as white silhouettes.
+        has_broken_descriptor_aliasing = true;
+        LOG_WARNING(Render_Vulkan, "MoltenVK: descriptor aliasing disabled (Metal slot limits)");
+    }
     if (is_qualcomm) {
         must_emulate_scaled_formats = true;
         LOG_WARNING(Render_Vulkan, "Qualcomm drivers require scaled vertex format emulation.");
