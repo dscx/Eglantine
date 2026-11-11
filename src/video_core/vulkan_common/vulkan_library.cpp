@@ -29,12 +29,14 @@ std::shared_ptr<Common::DynamicLibrary> OpenLibrary(
     // eden-cli is not an app bundle, so after the bundle's frameworks try the loader's plain
     // name (dyld's search paths) and the Homebrew prefixes, where a from-source build finds
     // vulkan-loader and molten-vk.
+    // MoltenVK itself before the Khronos loader: through Homebrew's loader the device setup
+    // stopped after an ICD error on this host, while MoltenVK directly ran the smoke boot.
     const char* library_paths[] = {std::getenv("LIBVULKAN_PATH"), libvulkan_filename.c_str(),
-                                   libmoltenvk_filename.c_str(), "libvulkan.1.dylib",
-                                   "/opt/homebrew/lib/libvulkan.1.dylib",
-                                   "/usr/local/lib/libvulkan.1.dylib",
+                                   libmoltenvk_filename.c_str(),
                                    "/opt/homebrew/lib/libMoltenVK.dylib",
-                                   "/usr/local/lib/libMoltenVK.dylib"};
+                                   "/usr/local/lib/libMoltenVK.dylib", "libvulkan.1.dylib",
+                                   "/opt/homebrew/lib/libvulkan.1.dylib",
+                                   "/usr/local/lib/libvulkan.1.dylib"};
     // Check if a path to a specific Vulkan library has been specified.
     for (const auto& library_path : library_paths) {
         if (library_path && library->Open(library_path)) {
