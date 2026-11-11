@@ -2769,10 +2769,23 @@ vk::PipelineCache PipelineCache::LoadVulkanPipelineCache(const std::filesystem::
         std::vector<char> cache_data(cache_size);
         file.read(cache_data.data(), cache_size);
 
-        LOG_INFO(Render_Vulkan,
-                 "Loaded Vulkan driver pipeline cache: ", Common::FS::PathToUTF8String(filename));
+        LOG_INFO(Render_Vulkan, "Loaded Vulkan driver pipeline cache: {}",
+                 Common::FS::PathToUTF8String(filename));
 
-        return create_pipeline_cache(cache_size, cache_data.data());
+        try {
+            return create_pipeline_cache(cache_size, cache_data.data());
+        } catch (const vk::Exception& e) {
+            // The driver refused its own blob (MoltenVK did after a session whose pipelines
+            // failed to build). Uncaught, this ended every later boot of the title before the
+            // first frame; start with an empty cache and drop the file instead.
+            LOG_ERROR(Render_Vulkan, "Driver rejected the saved pipeline cache ({}), deleting it",
+                      e.what());
+            if (!Common::FS::RemoveFile(filename)) {
+                LOG_ERROR(Common_Filesystem, "Failed to delete Vulkan driver pipeline cache file {}",
+                          Common::FS::PathToUTF8String(filename));
+            }
+            return create_pipeline_cache(0, nullptr);
+        }
 
     } catch (const std::ios_base::failure& e) {
         LOG_ERROR(Common_Filesystem, "{}", e.what());
