@@ -480,6 +480,13 @@ FN_MAX_LIMIT_LIST
         return max_samplers_per_stage;
     }
 
+    /// Whether a pipeline whose stages bind at most this many buffer descriptors may use push
+    /// descriptors. MoltenVK binds push descriptors to discrete Metal slots (31 a stage) and
+    /// never to an argument buffer, so past the budget the pipeline uses descriptor sets.
+    bool PushDescriptorsFit(u32 stage_buffers) const noexcept {
+        return stage_buffers <= max_push_descriptor_buffers;
+    }
+
     bool IsSampledImageArrayNonUniformIndexingSupported() const {
         return features.descriptor_indexing.shaderSampledImageArrayNonUniformIndexing;
     }
@@ -1362,6 +1369,7 @@ private:
     bool host_float16_supported{};             ///< shaderFloat16 as the driver reported it
     bool has_broken_descriptor_aliasing{};     ///< Miscompiles descriptors aliased on one binding
     u32 max_samplers_per_stage{};              ///< Separate samplers past this many textures
+    u32 max_push_descriptor_buffers{~0u};      ///< Descriptor sets past this many buffers a stage
     bool has_broken_parallel_compiling{};      ///< Has broken parallel shader compiling.
     bool has_renderdoc{};                      ///< Has RenderDoc attached
     bool has_nsight_graphics{};                ///< Has Nsight Graphics attached

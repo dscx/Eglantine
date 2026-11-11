@@ -434,12 +434,19 @@ GraphicsPipeline::GraphicsPipeline(
         try {
             MakePipeline(render_pass);
         } catch (const vk::Exception& exception) {
+            std::string descriptors;
+            for (size_t stage = 0; stage < NUM_STAGES; ++stage) {
+                if (spv_modules[stage]) {
+                    descriptors += fmt::format(" stage{}[{}]", stage,
+                                               DescribeDescriptors(stage_infos[stage]));
+                }
+            }
             LOG_CRITICAL(Render_Vulkan,
                          "Graphics pipeline build failed: {} (stages: tcs={} tes={} geom={}, "
-                         "patch control points {}, device max patch size {})",
+                         "patch control points {}, device max patch size {};{})",
                          exception.what(), spv_modules[1] ? 1 : 0, spv_modules[2] ? 1 : 0,
                          spv_modules[3] ? 1 : 0, key.state.patch_control_points_minus_one.Value() + 1,
-                         device.GetMaxTessellationPatchSize());
+                         device.GetMaxTessellationPatchSize(), descriptors);
             std::scoped_lock lock{build_mutex};
             is_built = true;
             build_condvar.notify_one();

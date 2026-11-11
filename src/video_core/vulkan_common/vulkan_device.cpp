@@ -554,6 +554,25 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
                         "MoltenVK: stages with more than {} textures use separate samplers",
                         sampler_slots);
         }
+        // MoltenVK binds push descriptors to discrete Metal slots and never to an argument
+        // buffer, and it advertises 287 of them, so every pipeline here pushed and a stage with
+        // more buffers than Metal has slots (31, less the push constants and MoltenVK's own
+        // buffers) failed to compile ('buffer' attribute parameter is out of bounds): Ocarina's
+        // 31-storage-buffer compute programs and its tessellation stages. Such pipelines use
+        // descriptor sets, which MoltenVK encodes as argument buffers without that limit.
+        // EDEN_NX2_MVK_PUSH_DESCRIPTORS=0 binds every pipeline that way, for comparison.
+        const u32 buffer_slots{properties.properties.limits.maxPerStageDescriptorUniformBuffers};
+        if (!Common::EnvGate("EDEN_NX2_MVK_PUSH_DESCRIPTORS")) {
+            max_push_descriptor_buffers = 0;
+        } else if (buffer_slots <= 32) {
+            max_push_descriptor_buffers = buffer_slots - 4;
+        }
+        if (max_push_descriptor_buffers != ~0u) {
+            LOG_WARNING(Render_Vulkan,
+                        "MoltenVK: pipelines with more than {} buffers in a stage use descriptor "
+                        "sets",
+                        max_push_descriptor_buffers);
+        }
     }
     if (is_qualcomm) {
         must_emulate_scaled_formats = true;

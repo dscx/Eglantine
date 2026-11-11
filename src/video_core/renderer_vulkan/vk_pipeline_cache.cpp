@@ -2244,6 +2244,14 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
             add(info.texture_buffer_descriptors, &compute_sampled_images);
             add(info.image_buffer_descriptors, nullptr);
             add(info.texture_descriptors, &compute_sampled_images);
+            // Separate samplers add one binding (the stage's sampler array) after the textures.
+            const u32 max_samplers{device.GetMaxSamplersPerStage()};
+            if (Shader::UsesSeparateSamplers(info, max_samplers)) {
+                ++output_binding;
+                if (emulated) {
+                    compute_resources += max_samplers;
+                }
+            }
             add(info.image_descriptors, nullptr);
         }
         if (compute_storage_buffers > device.GetMaxPerStageDescriptorStorageBuffers() ||

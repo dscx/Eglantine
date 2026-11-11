@@ -14,6 +14,7 @@
 #include <optional>
 
 #include <boost/container/small_vector.hpp>
+#include <fmt/format.h>
 
 #include "common/common_types.h"
 #include "common/logging.h"
@@ -26,6 +27,18 @@
 #include "video_core/vulkan_common/vulkan_device.h"
 
 namespace Vulkan {
+
+/// The descriptor counts of one stage, for the log line of a pipeline the driver refused: on
+/// MoltenVK it says which Metal slot limit (31 buffers, 16 samplers, 128 textures) was hit.
+inline std::string DescribeDescriptors(const Shader::Info& info) {
+    return fmt::format("cbufs={} ssbos={} texbufs={} imgbufs={} textures={} images={}",
+                       info.constant_buffer_descriptors.size(),
+                       info.storage_buffers_descriptors.size(),
+                       Shader::NumDescriptors(info.texture_buffer_descriptors),
+                       Shader::NumDescriptors(info.image_buffer_descriptors),
+                       Shader::NumDescriptors(info.texture_descriptors),
+                       Shader::NumDescriptors(info.image_descriptors));
+}
 
 using Shader::Backend::SPIRV::NUM_TEXTURE_AND_IMAGE_SCALING_WORDS;
 
@@ -261,7 +274,8 @@ public:
 
     bool CanUsePushDescriptor() const noexcept {
         if (!device->IsKhrPushDescriptorSupported() ||
-            num_descriptors > device->MaxPushDescriptors()) {
+            num_descriptors > device->MaxPushDescriptors() ||
+            !device->PushDescriptorsFit(max_stage_buffers)) {
             return false;
         }
         return !device->IsExtDescriptorBufferSupported() ||
@@ -423,6 +437,11 @@ public:
         Add(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, stage, info.storage_buffers_descriptors);
         Add(VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, stage, info.texture_buffer_descriptors);
         Add(VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, stage, info.image_buffer_descriptors);
+        max_stage_buffers = (std::max)(max_stage_buffers,
+                                       Shader::NumDescriptors(info.constant_buffer_descriptors) +
+                                           Shader::NumDescriptors(info.storage_buffers_descriptors) +
+                                           Shader::NumDescriptors(info.texture_buffer_descriptors) +
+                                           Shader::NumDescriptors(info.image_buffer_descriptors));
         // Separate samplers: the textures as images, then one binding with the stage's samplers
         // (the emitter declares them in this order too).
         const u32 max_samplers{device->GetMaxSamplersPerStage()};
@@ -480,6 +499,7 @@ private:
     boost::container::small_vector<VkDescriptorUpdateTemplateEntry, 32> entries;
     u32 binding{};
     u32 num_descriptors{};
+    u32 max_stage_buffers{}; ///< Buffer descriptors of the stage that binds the most
     size_t offset{};
 };
 
