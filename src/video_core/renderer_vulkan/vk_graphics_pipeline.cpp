@@ -52,6 +52,7 @@ using Shader::ImageBufferDescriptor;
 using Shader::Backend::SPIRV::RENDERAREA_LAYOUT_OFFSET;
 using Shader::Backend::SPIRV::RESCALING_LAYOUT_DOWN_FACTOR_OFFSET;
 using Shader::Backend::SPIRV::RESCALING_LAYOUT_WORDS_OFFSET;
+using Shader::Backend::SPIRV::SAMPLER_TABLE_LAYOUT_OFFSET;
 using Tegra::Texture::TexturePair;
 using VideoCore::Surface::PixelFormat;
 using VideoCore::Surface::PixelFormatFromDepthFormat;
@@ -316,7 +317,7 @@ GraphicsPipeline::GraphicsPipeline(
         num_textures += Shader::NumDescriptors(info->texture_descriptors);
         num_image_elements += Shader::NumDescriptors(info->texture_descriptors);
         num_image_elements += Shader::NumDescriptors(info->image_descriptors);
-        num_descriptor_entries += NumDescriptorEntries(*info);
+        num_descriptor_entries += NumDescriptorEntries(*info, device.GetMaxSamplersPerStage());
         has_render_area_push_constants |= info->uses_render_area;
     }
     fragment_has_color0_output = stage_infos[NUM_STAGES - 1].stores_frag_color[0];
@@ -335,6 +336,7 @@ GraphicsPipeline::GraphicsPipeline(
     });
 
     DescriptorLayoutBuilder builder{MakeBuilder(device, stage_infos, mesh_emulation)};
+    has_sampler_table = builder.UsesSeparateSamplers();
     // Mesh emulation binds one descriptor set to both the compute dispatch and the draw.
     uses_push_descriptor = !mesh_emulation && builder.CanUsePushDescriptor();
     uses_descriptor_buffer = !mesh_emulation && builder.CanUseDescriptorBuffer() &&
@@ -792,6 +794,7 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
 
     RescalingPushConstant rescaling;
     RenderAreaPushConstant render_area;
+    SamplerTablePushConstant sampler_table;
     const VideoCommon::SamplerId* samplers_it{samplers.data()};
     const VideoCommon::ImageViewInOut* views_it{views.data()};
     const auto prepare_stage{[&](size_t stage) LAMBDA_FORCEINLINE {
@@ -804,7 +807,8 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
             !info.texture_buffer_descriptors.empty() || !info.image_buffer_descriptors.empty()) {
             Profile::Scope scope{Profile::Zone::PushDescriptors};
             PushImageDescriptors(texture_cache, guest_descriptor_queue, info, rescaling,
-                                 samplers_it, views_it);
+                                 sampler_table, device.GetMaxSamplersPerStage(), samplers_it,
+                                 views_it);
         }
     }};
     if constexpr (Spec::enabled_stages[0]) {
@@ -867,11 +871,12 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
         return false;
     }
     Profile::Scope scope{Profile::Zone::ConfigureDraw};
-    return ConfigureDraw(rescaling, render_area, is_indexed);
+    return ConfigureDraw(rescaling, render_area, sampler_table, is_indexed);
 }
 
 bool GraphicsPipeline::ConfigureDraw(const RescalingPushConstant& rescaling,
                                      const RenderAreaPushConstant& render_area,
+                                     const SamplerTablePushConstant& sampler_table,
                                      bool is_indexed) {
     const void* const descriptor_data{guest_descriptor_queue.UpdateData()};
 
@@ -925,6 +930,7 @@ bool GraphicsPipeline::ConfigureDraw(const RescalingPushConstant& rescaling,
         scheduler.Record([this, descriptor_data, groups = mesh_groups, capacity = mesh_capacity,
                           task_buffers = mesh_task_buffers,
                           rescaling_data = rescaling.Data(), is_rescaling = texture_cache.IsRescaling(),
+                          sampler_table_data = sampler_table.Data(),
                           uses_render_area = render_area.uses_render_area,
                           render_area_data = render_area.words](vk::CommandBuffer cmdbuf) {
             mesh_descriptor_set = VK_NULL_HANDLE;
@@ -943,6 +949,10 @@ bool GraphicsPipeline::ConfigureDraw(const RescalingPushConstant& rescaling,
                                                          VK_SHADER_STAGE_COMPUTE_BIT};
                 cmdbuf.PushConstants(*pipeline_layout, push_stages, RESCALING_LAYOUT_WORDS_OFFSET,
                                      sizeof(rescaling_data), rescaling_data.data());
+                if (has_sampler_table) {
+                    cmdbuf.PushConstants(*pipeline_layout, push_stages, SAMPLER_TABLE_LAYOUT_OFFSET,
+                                         sizeof(sampler_table_data), sampler_table_data.data());
+                }
                 const f32 config_down_factor{Settings::values.resolution_info.down_factor};
                 const f32 down_factor{is_rescaling ? config_down_factor : 1.0f};
                 cmdbuf.PushConstants(*pipeline_layout, push_stages,
@@ -1112,6 +1122,7 @@ bool GraphicsPipeline::ConfigureDraw(const RescalingPushConstant& rescaling,
     scheduler.Record([this, descriptor_data, bind_pipeline, update_descriptors,
                       descriptor_buffer_offset, descriptor_buffer_chunk, bind_descriptor_buffer,
                       rescaling_data, is_rescaling, update_rescaling,
+                      sampler_table_data = sampler_table.Data(),
                       uses_render_area = render_area.uses_render_area,
                       render_area_data = render_area.words](vk::CommandBuffer cmdbuf) {
         if (bind_descriptor_buffer) {
@@ -1134,6 +1145,10 @@ bool GraphicsPipeline::ConfigureDraw(const RescalingPushConstant& rescaling,
                 : VK_SHADER_STAGE_ALL_GRAPHICS;
         cmdbuf.PushConstants(*pipeline_layout, push_stages, RESCALING_LAYOUT_WORDS_OFFSET,
                              sizeof(rescaling_data), rescaling_data.data());
+        if (has_sampler_table) {
+            cmdbuf.PushConstants(*pipeline_layout, push_stages, SAMPLER_TABLE_LAYOUT_OFFSET,
+                                 sizeof(sampler_table_data), sampler_table_data.data());
+        }
         if (update_rescaling || mesh_emulation) {
             const f32 config_down_factor{Settings::values.resolution_info.down_factor};
             const f32 scale_down_factor{is_rescaling ? config_down_factor : 1.0f};

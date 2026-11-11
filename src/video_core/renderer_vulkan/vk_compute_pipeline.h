@@ -103,6 +103,7 @@ private:
     u32 num_descriptor_entries{};
     bool has_image_resources{false};
     bool has_rescaling_push_constants{false};
+    bool has_sampler_table{false}; ///< Binds separate samplers (SamplerTableLayout)
     boost::container::small_vector<VideoCommon::ImageViewId, 8> written_images;
     std::vector<SampledImage> sampled_images;
 

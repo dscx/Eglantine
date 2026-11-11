@@ -274,7 +274,8 @@ private:
     bool ConfigureImpl(bool is_indexed);
 
     bool ConfigureDraw(const RescalingPushConstant& rescaling,
-                       const RenderAreaPushConstant& render_are, bool is_indexed);
+                       const RenderAreaPushConstant& render_are,
+                       const SamplerTablePushConstant& sampler_table, bool is_indexed);
 
     void MakePipeline(VkRenderPass render_pass);
 
@@ -310,6 +311,7 @@ private:
     u32 color_output_mask{};
     bool writes_storage{};
     bool has_render_area_push_constants{};
+    bool has_sampler_table{}; ///< A stage binds separate samplers (SamplerTableLayout)
 
     vk::DescriptorSetLayout descriptor_set_layout;
     DescriptorAllocator descriptor_allocator;

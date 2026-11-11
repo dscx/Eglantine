@@ -95,6 +95,14 @@ public:
         };
     }
 
+    void AddSampler(VkSampler sampler) {
+        *(payload_cursor++) = VkDescriptorImageInfo{
+            .sampler = sampler,
+            .imageView = VK_NULL_HANDLE,
+            .imageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        };
+    }
+
     void AddBuffer(VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size) {
         *(payload_cursor++) = VkDescriptorBufferInfo{
             .buffer = buffer,

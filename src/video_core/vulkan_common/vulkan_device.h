@@ -474,6 +474,12 @@ FN_MAX_LIMIT_LIST
         return !has_broken_descriptor_aliasing;
     }
 
+    /// Sampler slots a stage has where they are scarce (Metal: 16), 0 elsewhere. A stage with
+    /// more sampled textures than this binds them as separate images plus a sampler array.
+    u32 GetMaxSamplersPerStage() const noexcept {
+        return max_samplers_per_stage;
+    }
+
     bool IsSampledImageArrayNonUniformIndexingSupported() const {
         return features.descriptor_indexing.shaderSampledImageArrayNonUniformIndexing;
     }
@@ -1355,6 +1361,7 @@ private:
     bool has_broken_cube_compatibility{};      ///< Has broken cube compatibility bit
     bool host_float16_supported{};             ///< shaderFloat16 as the driver reported it
     bool has_broken_descriptor_aliasing{};     ///< Miscompiles descriptors aliased on one binding
+    u32 max_samplers_per_stage{};              ///< Separate samplers past this many textures
     bool has_broken_parallel_compiling{};      ///< Has broken parallel shader compiling.
     bool has_renderdoc{};                      ///< Has RenderDoc attached
     bool has_nsight_graphics{};                ///< Has Nsight Graphics attached

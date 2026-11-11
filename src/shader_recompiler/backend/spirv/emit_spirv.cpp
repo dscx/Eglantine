@@ -541,6 +541,10 @@ void SetupCapabilities(const Profile& profile, const Info& info, EmitContext& ct
     ctx.AddCapability(spv::Capability::ImageGatherExtended);
     ctx.AddCapability(spv::Capability::ImageQuery);
     ctx.AddCapability(spv::Capability::SampledBuffer);
+    if (ctx.uses_separate_samplers) {
+        // The sampler array is indexed with the table entry read at run time.
+        ctx.AddCapability(spv::Capability::SampledImageArrayDynamicIndexing);
+    }
     if (!ctx.non_uniform_ids.empty()) {
         if (ctx.profile.supported_spirv < 0x00010500)
             ctx.AddExtension("SPV_EXT_descriptor_indexing");

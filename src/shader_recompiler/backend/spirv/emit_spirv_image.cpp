@@ -4,6 +4,8 @@
 // SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+
 #include <boost/container/static_vector.hpp>
 
 #include "common/settings.h"
@@ -239,8 +241,42 @@ private:
     spv::ImageOperandsMask mask{};
 };
 
+Id TextureImage(EmitContext& ctx, IR::TextureInstInfo info, const IR::Value& index);
+
+// Separate samplers: the texture slot's 4-bit index in the push constant table picks the
+// sampler from the stage's array.
+Id SeparateSampler(EmitContext& ctx, const TextureDefinition& def, const IR::Value& index) {
+    const Id push_constant_u32{ctx.TypePointer(spv::StorageClass::PushConstant, ctx.U32[1])};
+    const Id member{ctx.Const(ctx.sampler_table_member_index)};
+    Id sampler_index{};
+    if (index.IsImmediate()) {
+        const u32 slot{(std::min)(def.slot + index.U32(), MAX_SAMPLER_TABLE_SLOTS - 1)};
+        const Id pointer{ctx.OpAccessChain(push_constant_u32, ctx.rescaling_push_constants,
+                                           member, ctx.Const(slot / 8))};
+        const Id word{ctx.OpLoad(ctx.U32[1], pointer)};
+        sampler_index =
+            ctx.OpBitFieldUExtract(ctx.U32[1], word, ctx.Const((slot % 8) * 4), ctx.Const(4u));
+    } else {
+        const Id slot{ctx.OpUMin(ctx.U32[1], ctx.OpIAdd(ctx.U32[1], ctx.Def(index), ctx.Const(def.slot)),
+                                 ctx.Const(MAX_SAMPLER_TABLE_SLOTS - 1))};
+        const Id word_index{ctx.OpShiftRightLogical(ctx.U32[1], slot, ctx.Const(3u))};
+        const Id pointer{ctx.OpAccessChain(push_constant_u32, ctx.rescaling_push_constants,
+                                           member, word_index)};
+        const Id word{ctx.OpLoad(ctx.U32[1], pointer)};
+        const Id shift{ctx.OpShiftLeftLogical(
+            ctx.U32[1], ctx.OpBitwiseAnd(ctx.U32[1], slot, ctx.Const(7u)), ctx.Const(2u))};
+        sampler_index = ctx.OpBitFieldUExtract(ctx.U32[1], word, shift, ctx.Const(4u));
+    }
+    const Id pointer{ctx.OpAccessChain(ctx.sampler_pointer_type, ctx.separate_samplers, sampler_index)};
+    return ctx.OpLoad(ctx.sampler_type, pointer);
+}
+
 Id Texture(EmitContext& ctx, IR::TextureInstInfo info, [[maybe_unused]] const IR::Value& index) {
     const TextureDefinition& def{ctx.textures.at(info.descriptor_index)};
+    if (ctx.uses_separate_samplers) {
+        const Id image{TextureImage(ctx, info, index)};
+        return ctx.OpSampledImage(def.sampled_type, image, SeparateSampler(ctx, def, index));
+    }
     if (def.count > 1) {
         auto const idx = index.IsImmediate() ? ctx.Const(index.U32()) : ctx.Def(index);
         const bool non_uniform{MarkNonUniform(ctx, idx, index, NonUniformKind::SampledImage)};
@@ -274,6 +310,21 @@ Id TextureImage(EmitContext& ctx, IR::TextureInstInfo info, const IR::Value& ind
         return ctx.OpLoad(ctx.image_buffer_type, def.id);
     } else {
         const TextureDefinition& def{ctx.textures.at(info.descriptor_index)};
+        if (ctx.uses_separate_samplers) {
+            // The binding is the image itself.
+            if (def.count > 1) {
+                const Id idx{index.IsImmediate() ? ctx.Const(index.U32()) : ctx.Def(index)};
+                const bool non_uniform{MarkNonUniform(ctx, idx, index, NonUniformKind::SampledImage)};
+                const Id ptr{ctx.OpAccessChain(def.pointer_type, def.id, idx)};
+                const Id image{ctx.OpLoad(def.image_type, ptr)};
+                if (non_uniform) {
+                    DecorateNonUniform(ctx, ptr);
+                    DecorateNonUniform(ctx, image);
+                }
+                return image;
+            }
+            return ctx.OpLoad(def.image_type, def.id);
+        }
         if (def.count > 1) {
             auto const idx = index.IsImmediate() ? ctx.Const(index.U32()) : ctx.Def(index);
             const bool non_uniform{MarkNonUniform(ctx, idx, index, NonUniformKind::SampledImage)};

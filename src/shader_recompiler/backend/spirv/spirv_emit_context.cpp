@@ -518,7 +518,8 @@ EmitContext::EmitContext(const Profile& profile_, const RuntimeInfo& runtime_inf
     DefineStorageBuffers(program.info, storage_binding);
     DefineTextureBuffers(program.info, texture_binding);
     DefineImageBuffers(program.info, image_binding);
-    DefineTextures(program.info, texture_binding, bindings.texture_scaling_index);
+    DefineTextures(program.info, texture_binding, bindings.texture_scaling_index,
+                   bindings.texture_slot_index);
     DefineImages(program.info, image_binding, bindings.image_scaling_index);
     DefineAttributeMemAccess(program.info);
     DefineWriteStorageCasLoopFunction(program.info);
@@ -1280,7 +1281,7 @@ void EmitContext::DefineGlobalMemoryFunctions(const IR::Program& program) {
 }
 
 void EmitContext::DefineRescalingInput(const Info& info) {
-    if (!info.uses_rescaling_uniform) {
+    if (!info.uses_rescaling_uniform && !uses_separate_samplers) {
         return;
     }
     if (profile.unified_descriptor_binding) {
@@ -1291,7 +1292,7 @@ void EmitContext::DefineRescalingInput(const Info& info) {
 }
 
 void EmitContext::DefineRescalingInputPushConstant() {
-    boost::container::static_vector<Id, 3> members{};
+    boost::container::static_vector<Id, 4> members{};
     u32 member_index{0};
 
     rescaling_textures_type = TypeArray(U32[1], Const(4u));
@@ -1307,6 +1308,12 @@ void EmitContext::DefineRescalingInputPushConstant() {
     if (stage != Stage::Compute) {
         members.push_back(F32[1]);
         rescaling_downfactor_member_index = member_index++;
+    }
+    if (uses_separate_samplers) {
+        sampler_table_type = TypeArray(U32[1], Const(NUM_SAMPLER_TABLE_WORDS));
+        Decorate(sampler_table_type, spv::Decoration::ArrayStride, 4u);
+        members.push_back(sampler_table_type);
+        sampler_table_member_index = member_index++;
     }
     const Id push_constant_struct{TypeStruct(std::span(members.data(), members.size()))};
     Decorate(push_constant_struct, spv::Decoration::Block);
@@ -1325,6 +1332,11 @@ void EmitContext::DefineRescalingInputPushConstant() {
                        spv::Decoration::Offset,
                        static_cast<u32>(offsetof(RescalingLayout, down_factor)));
         MemberName(push_constant_struct, rescaling_downfactor_member_index, "down_factor");
+    }
+    if (uses_separate_samplers) {
+        MemberDecorate(push_constant_struct, sampler_table_member_index, spv::Decoration::Offset,
+                       SAMPLER_TABLE_LAYOUT_OFFSET);
+        MemberName(push_constant_struct, sampler_table_member_index, "sampler_table");
     }
     const Id pointer_type{TypePointer(spv::StorageClass::PushConstant, push_constant_struct)};
     rescaling_push_constants = AddGlobalVariable(pointer_type, spv::StorageClass::PushConstant);
@@ -1632,13 +1644,17 @@ void EmitContext::DefineImageBuffers(const Info& info, u32& binding) {
     }
 }
 
-void EmitContext::DefineTextures(const Info& info, u32& binding, u32& scaling_index) {
+void EmitContext::DefineTextures(const Info& info, u32& binding, u32& scaling_index,
+                                 u32& slot_index) {
+    uses_separate_samplers = UsesSeparateSamplers(info, profile.max_samplers_per_stage);
     textures.reserve(info.texture_descriptors.size());
     for (const TextureDescriptor& desc : info.texture_descriptors) {
         const Id image_type{ImageType(*this, desc)};
         const Id sampled_type{TypeSampledImage(image_type)};
-        const Id pointer_type{TypePointer(spv::StorageClass::UniformConstant, sampled_type)};
-        const Id desc_type{DescType(*this, sampled_type, pointer_type, desc.count)};
+        // With separate samplers the binding holds the image alone.
+        const Id bound_type{uses_separate_samplers ? image_type : sampled_type};
+        const Id pointer_type{TypePointer(spv::StorageClass::UniformConstant, bound_type)};
+        const Id desc_type{DescType(*this, bound_type, pointer_type, desc.count)};
         const Id id{AddGlobalVariable(desc_type, spv::StorageClass::UniformConstant)};
         Decorate(id, spv::Decoration::Binding, binding);
         Decorate(id, spv::Decoration::DescriptorSet, 0U);
@@ -1651,12 +1667,30 @@ void EmitContext::DefineTextures(const Info& info, u32& binding, u32& scaling_in
             .count = desc.count,
             .is_multisample = desc.is_multisample,
             .is_integer = desc.is_integer,
+            .slot = slot_index,
         });
         if (profile.supported_spirv >= 0x00010400) {
             interfaces.push_back(id);
         }
         ++binding;
         ++scaling_index;
+        slot_index += desc.count;
+    }
+    if (uses_separate_samplers) {
+        // One binding after the textures: the stage's samplers, indexed per texture from the
+        // push constant table (see SamplerTableLayout).
+        sampler_type = TypeSampler();
+        sampler_pointer_type = TypePointer(spv::StorageClass::UniformConstant, sampler_type);
+        const Id array_type{TypeArray(sampler_type, Const(profile.max_samplers_per_stage))};
+        const Id array_pointer_type{TypePointer(spv::StorageClass::UniformConstant, array_type)};
+        separate_samplers = AddGlobalVariable(array_pointer_type, spv::StorageClass::UniformConstant);
+        Decorate(separate_samplers, spv::Decoration::Binding, binding);
+        Decorate(separate_samplers, spv::Decoration::DescriptorSet, 0U);
+        Name(separate_samplers, "samplers");
+        if (profile.supported_spirv >= 0x00010400) {
+            interfaces.push_back(separate_samplers);
+        }
+        ++binding;
     }
     if (info.uses_atomic_image_u32) {
         image_u32 = TypePointer(spv::StorageClass::Image, U32[1]);

@@ -6,9 +6,11 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <iterator>
 #include <optional>
 
 #include <boost/container/small_vector.hpp>
@@ -95,6 +97,10 @@ inline void ReportPipelineBuildWait(const char* kind, u64 hash,
         return props.combinedImageSamplerDescriptorSize;
     case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
         return props.storageImageDescriptorSize;
+    case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+        return props.sampledImageDescriptorSize;
+    case VK_DESCRIPTOR_TYPE_SAMPLER:
+        return props.samplerDescriptorSize;
     default:
         return 0;
     }
@@ -153,6 +159,12 @@ inline void WriteDescriptorBuffer(const Device& device, const DescriptorBufferLa
                 break;
             case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
                 get_info.data.pStorageImage = &entry.image;
+                break;
+            case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+                get_info.data.pSampledImage = &entry.image;
+                break;
+            case VK_DESCRIPTOR_TYPE_SAMPLER:
+                get_info.data.pSampler = &entry.image.sampler;
                 break;
             default:
                 continue;
@@ -214,6 +226,12 @@ inline void WriteDescriptorBuffer(const Device& device, const DescriptorBufferLa
             case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
                 get_info.data.pStorageImage = &entry.image;
                 break;
+            case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+                get_info.data.pSampledImage = &entry.image;
+                break;
+            case VK_DESCRIPTOR_TYPE_SAMPLER:
+                get_info.data.pSampler = &entry.image.sampler;
+                break;
             default:
                 continue;
             }
@@ -226,13 +244,15 @@ inline void WriteDescriptorBuffer(const Device& device, const DescriptorBufferLa
     }
 }
 
-[[nodiscard]] inline u32 NumDescriptorEntries(const Shader::Info& info) {
+/// Descriptors a stage pushes, the sampler array included where it binds separate samplers.
+[[nodiscard]] inline u32 NumDescriptorEntries(const Shader::Info& info, u32 max_samplers = 0) {
     return Shader::NumDescriptors(info.constant_buffer_descriptors) +
            Shader::NumDescriptors(info.storage_buffers_descriptors) +
            Shader::NumDescriptors(info.texture_buffer_descriptors) +
            Shader::NumDescriptors(info.image_buffer_descriptors) +
            Shader::NumDescriptors(info.texture_descriptors) +
-           Shader::NumDescriptors(info.image_descriptors);
+           Shader::NumDescriptors(info.image_descriptors) +
+           (Shader::UsesSeparateSamplers(info, max_samplers) ? max_samplers : 0);
 }
 
 class DescriptorLayoutBuilder {
@@ -338,6 +358,12 @@ public:
         using Shader::Backend::SPIRV::RenderAreaLayout;
         using Shader::Backend::SPIRV::RescalingLayout;
         const u32 size_offset = is_compute ? sizeof(RescalingLayout::down_factor) : 0u;
+        // The sampler table sits after both layouts (see SamplerTableLayout).
+        const u32 size = uses_separate_samplers
+                             ? Shader::Backend::SPIRV::SAMPLER_TABLE_LAYOUT_OFFSET +
+                                   static_cast<u32>(sizeof(Shader::Backend::SPIRV::SamplerTableLayout))
+                             : static_cast<u32>(sizeof(RescalingLayout)) - size_offset +
+                                   static_cast<u32>(sizeof(RenderAreaLayout));
         const VkPushConstantRange range{
             .stageFlags = static_cast<VkShaderStageFlags>(
                 is_compute ? VK_SHADER_STAGE_COMPUTE_BIT
@@ -347,8 +373,7 @@ public:
                                        VK_SHADER_STAGE_MESH_BIT_EXT
                                  : VK_SHADER_STAGE_ALL_GRAPHICS)),
             .offset = 0,
-            .size = static_cast<u32>(sizeof(RescalingLayout)) - size_offset +
-                    static_cast<u32>(sizeof(RenderAreaLayout)),
+            .size = size,
         };
         return device->GetLogical().CreatePipelineLayout({
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -398,8 +423,22 @@ public:
         Add(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, stage, info.storage_buffers_descriptors);
         Add(VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, stage, info.texture_buffer_descriptors);
         Add(VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, stage, info.image_buffer_descriptors);
-        Add(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, stage, info.texture_descriptors);
+        // Separate samplers: the textures as images, then one binding with the stage's samplers
+        // (the emitter declares them in this order too).
+        const u32 max_samplers{device->GetMaxSamplersPerStage()};
+        if (Shader::UsesSeparateSamplers(info, max_samplers)) {
+            uses_separate_samplers = true;
+            Add(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, stage, info.texture_descriptors);
+            AddBinding(VK_DESCRIPTOR_TYPE_SAMPLER, stage, max_samplers);
+        } else {
+            Add(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, stage, info.texture_descriptors);
+        }
         Add(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, stage, info.image_descriptors);
+    }
+
+    /// Whether a stage binds separate samplers: the push constants then carry the table.
+    bool UsesSeparateSamplers() const noexcept {
+        return uses_separate_samplers;
     }
 
 private:
@@ -407,31 +446,36 @@ private:
     void Add(VkDescriptorType type, VkShaderStageFlags stage, const Descriptors& descriptors) {
         const size_t num{descriptors.size()};
         for (size_t i = 0; i < num; ++i) {
-            bindings.push_back({
-                .binding = binding,
-                .descriptorType = type,
-                .descriptorCount = descriptors[i].count,
-                .stageFlags = stage,
-                .pImmutableSamplers = nullptr,
-            });
-            entries.push_back({
-                .dstBinding = binding,
-                .dstArrayElement = 0,
-                .descriptorCount = descriptors[i].count,
-                .descriptorType = type,
-                .offset = offset,
-                .stride = sizeof(DescriptorUpdateEntry),
-            });
-            ++binding;
-            num_descriptors += descriptors[i].count;
-            offset += sizeof(DescriptorUpdateEntry) * descriptors[i].count;
+            AddBinding(type, stage, descriptors[i].count);
         }
+    }
+
+    void AddBinding(VkDescriptorType type, VkShaderStageFlags stage, u32 count) {
+        bindings.push_back({
+            .binding = binding,
+            .descriptorType = type,
+            .descriptorCount = count,
+            .stageFlags = stage,
+            .pImmutableSamplers = nullptr,
+        });
+        entries.push_back({
+            .dstBinding = binding,
+            .dstArrayElement = 0,
+            .descriptorCount = count,
+            .descriptorType = type,
+            .offset = offset,
+            .stride = sizeof(DescriptorUpdateEntry),
+        });
+        ++binding;
+        num_descriptors += count;
+        offset += sizeof(DescriptorUpdateEntry) * count;
     }
 
     const Device* device{};
     bool is_compute{};
     bool uses_mesh{};
     bool mesh_emulation{};
+    bool uses_separate_samplers{};
     boost::container::small_vector<VkDescriptorSetLayoutBinding, 32> bindings;
     boost::container::small_vector<VkDescriptorUpdateTemplateEntry, 32> entries;
     u32 binding{};
@@ -479,9 +523,35 @@ public:
     std::array<f32, 4> words{};
 };
 
+/// Separate samplers: 4 bits per sampled texture of the pipeline, in push order, naming the
+/// sampler array entry its stage sampled it with (SamplerTableLayout).
+class SamplerTablePushConstant {
+public:
+    void Push(u32 sampler_index) noexcept {
+        if (slot < Shader::Backend::SPIRV::MAX_SAMPLER_TABLE_SLOTS) {
+            words[slot / 8] |= (sampler_index & 0xFu) << ((slot % 8) * 4);
+        }
+        ++slot;
+    }
+
+    /// A texture bound with its own sampler still takes a slot.
+    void Skip() noexcept {
+        ++slot;
+    }
+
+    const std::array<u32, Shader::Backend::SPIRV::NUM_SAMPLER_TABLE_WORDS>& Data() const noexcept {
+        return words;
+    }
+
+private:
+    std::array<u32, Shader::Backend::SPIRV::NUM_SAMPLER_TABLE_WORDS> words{};
+    u32 slot{};
+};
+
 inline void PushImageDescriptors(TextureCache& texture_cache,
                                  GuestDescriptorQueue& guest_descriptor_queue,
                                  const Shader::Info& info, RescalingPushConstant& rescaling,
+                                 SamplerTablePushConstant& sampler_table, u32 max_samplers,
                                  const VideoCommon::SamplerId*& samplers,
                                  const VideoCommon::ImageViewInOut*& views) {
     const u32 num_texture_buffers = Shader::NumDescriptors(info.texture_buffer_descriptors);
@@ -489,6 +559,9 @@ inline void PushImageDescriptors(TextureCache& texture_cache,
     views += num_texture_buffers;
     views += num_image_buffers;
     const bool rescaling_active{Settings::values.resolution_info.active};
+    // Separate samplers: the stage's distinct samplers, each texture's table entry its index.
+    const bool separate_samplers{Shader::UsesSeparateSamplers(info, max_samplers)};
+    boost::container::static_vector<VkSampler, 16> stage_samplers;
     for (const auto& desc : info.texture_descriptors) {
         bool is_rescaled{};
         for (u32 index = 0; index < desc.count; ++index) {
@@ -501,13 +574,42 @@ inline void PushImageDescriptors(TextureCache& texture_cache,
                 if (null_image_view != VK_NULL_HANDLE) vk_image_view = null_image_view;
             }
             Sampler& sampler{texture_cache.GetSampler(sampler_id)};
-            guest_descriptor_queue.AddSampledImage(vk_image_view,
-                                                   sampler.HandleFor(image_view, desc.is_depth));
+            const VkSampler vk_sampler{sampler.HandleFor(image_view, desc.is_depth)};
+            if (separate_samplers) {
+                guest_descriptor_queue.AddImage(vk_image_view);
+                const auto it{std::ranges::find(stage_samplers, vk_sampler)};
+                u32 sampler_index{static_cast<u32>(std::distance(stage_samplers.begin(), it))};
+                if (it == stage_samplers.end()) {
+                    if (stage_samplers.size() < max_samplers) {
+                        stage_samplers.push_back(vk_sampler);
+                    } else {
+                        // More distinct samplers than slots: the first one stands in.
+                        static std::atomic<u32> logged{};
+                        if (logged.fetch_add(1) < 8) {
+                            LOG_WARNING(Render_Vulkan,
+                                        "Stage samples with more than {} distinct samplers",
+                                        max_samplers);
+                        }
+                        sampler_index = 0;
+                    }
+                }
+                sampler_table.Push(sampler_index);
+            } else {
+                guest_descriptor_queue.AddSampledImage(vk_image_view, vk_sampler);
+                sampler_table.Skip();
+            }
             if (rescaling_active) {
                 is_rescaled |= texture_cache.IsRescaling(image_view);
             }
         }
         rescaling.PushTexture(is_rescaled);
+    }
+    if (separate_samplers) {
+        // The array is written whole; unused entries repeat the first sampler.
+        for (u32 index = 0; index < max_samplers; ++index) {
+            guest_descriptor_queue.AddSampler(
+                index < stage_samplers.size() ? stage_samplers[index] : stage_samplers.front());
+        }
     }
     for (const auto& desc : info.image_descriptors) {
         bool is_rescaled{};

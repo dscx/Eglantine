@@ -42,6 +42,7 @@ struct TextureDefinition {
     u32 count;
     bool is_multisample;
     bool is_integer;
+    u32 slot; ///< First sampler table slot of this descriptor (separate samplers)
 };
 
 struct TextureBufferDefinition {
@@ -320,6 +321,14 @@ public:
     u32 texture_rescaling_index{};
     u32 image_rescaling_index{};
 
+    // Separate samplers: textures are plain images and sample through this stage's array.
+    bool uses_separate_samplers{};
+    Id separate_samplers{};
+    Id sampler_type{};
+    Id sampler_pointer_type{};
+    Id sampler_table_type{};
+    u32 sampler_table_member_index{};
+
     Id render_area_push_constant{};
     u32 render_are_member_index{};
 
@@ -449,7 +458,7 @@ private:
     void DefineStorageBuffers(const Info& info, u32& binding);
     void DefineTextureBuffers(const Info& info, u32& binding);
     void DefineImageBuffers(const Info& info, u32& binding);
-    void DefineTextures(const Info& info, u32& binding, u32& scaling_index);
+    void DefineTextures(const Info& info, u32& binding, u32& scaling_index, u32& slot_index);
     void DefineImages(const Info& info, u32& binding, u32& scaling_index);
     void DefineAttributeMemAccess(const Info& info);
     void DefineWriteStorageCasLoopFunction(const Info& info);

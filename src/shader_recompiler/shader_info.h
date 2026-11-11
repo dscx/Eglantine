@@ -411,6 +411,12 @@ u32 NumDescriptors(const Descriptors& descriptors) {
     return num;
 }
 
+/// Whether a stage binds its textures as separate images plus a sampler array
+/// (Profile::max_samplers_per_stage): the backend and the host decide this the same way.
+[[nodiscard]] inline bool UsesSeparateSamplers(const Info& info, u32 max_samplers) {
+    return max_samplers != 0 && NumDescriptors(info.texture_descriptors) > max_samplers;
+}
+
 
 /// Operations of a handle program, a stack machine over 32-bit words. Operands follow the
 /// operation code in the program; values are popped right operand first.

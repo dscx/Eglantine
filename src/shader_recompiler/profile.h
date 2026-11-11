@@ -116,6 +116,11 @@ struct Profile {
 
     u64 min_ssbo_alignment{};
     u32 max_user_clip_distances{};
+    /// Hosts with few sampler slots per stage (Metal binds 16): a stage with more sampled
+    /// textures than this gets them as separate images plus one array of this many samplers,
+    /// each texture picking its sampler through the push constant table (4-bit indices, so at
+    /// most 16). 0 keeps combined image samplers.
+    u32 max_samplers_per_stage{};
 
     bool SupportsSubgroupStage(Stage stage) const {
         return (supported_subgroup_stages & (1u << static_cast<u32>(stage))) != 0;

@@ -32,6 +32,7 @@ namespace Vulkan {
 
 using Shader::ImageBufferDescriptor;
 using Shader::Backend::SPIRV::RESCALING_LAYOUT_WORDS_OFFSET;
+using Shader::Backend::SPIRV::SAMPLER_TABLE_LAYOUT_OFFSET;
 using Tegra::Texture::TexturePair;
 
 ComputePipeline::ComputePipeline(const Device& device_, Scheduler& scheduler, vk::PipelineCache& pipeline_cache_,
@@ -51,7 +52,7 @@ ComputePipeline::ComputePipeline(const Device& device_, Scheduler& scheduler, vk
     }
     std::copy_n(info.constant_buffer_used_sizes.begin(), uniform_buffer_sizes.size(),
                 uniform_buffer_sizes.begin());
-    num_descriptor_entries = NumDescriptorEntries(info);
+    num_descriptor_entries = NumDescriptorEntries(info, device.GetMaxSamplersPerStage());
     has_rescaling_push_constants =
         !info.texture_descriptors.empty() || !info.image_descriptors.empty();
     has_image_resources = has_rescaling_push_constants ||
@@ -60,6 +61,7 @@ ComputePipeline::ComputePipeline(const Device& device_, Scheduler& scheduler, vk
 
     DescriptorLayoutBuilder builder{device};
     builder.Add(info, VK_SHADER_STAGE_COMPUTE_BIT);
+    has_sampler_table = builder.UsesSeparateSamplers();
 
     uses_push_descriptor = builder.CanUsePushDescriptor();
     uses_descriptor_buffer = builder.CanUseDescriptorBuffer() && descriptor_buffer_ring.IsValid();
@@ -210,6 +212,7 @@ bool ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
     }
 
     RescalingPushConstant rescaling;
+    SamplerTablePushConstant sampler_table;
     if (has_image_resources) {
         texture_cache.SynchronizeDescriptors(true);
 
@@ -350,7 +353,8 @@ bool ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
 
         const VideoCommon::SamplerId* samplers_it{samplers.data()};
         const VideoCommon::ImageViewInOut* views_it{views.data()};
-        PushImageDescriptors(texture_cache, guest_descriptor_queue, info, rescaling, samplers_it,
+        PushImageDescriptors(texture_cache, guest_descriptor_queue, info, rescaling,
+                             sampler_table, device.GetMaxSamplersPerStage(), samplers_it,
                              views_it);
     } else {
         if (RecordingSampledTextures()) {
@@ -435,7 +439,8 @@ bool ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
     }
     scheduler.Record([this, descriptor_data, is_rescaling, descriptor_buffer_offset,
                       descriptor_buffer_chunk, bind_descriptor_buffer,
-                      rescaling_data = rescaling.Data()](vk::CommandBuffer cmdbuf) {
+                      rescaling_data = rescaling.Data(),
+                      sampler_table_data = sampler_table.Data()](vk::CommandBuffer cmdbuf) {
         if (bind_descriptor_buffer) {
             const VkDescriptorBufferBindingInfoEXT binding_info{
                 descriptor_buffer_ring.BindingInfo(descriptor_buffer_chunk)};
@@ -452,6 +457,11 @@ bool ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
             cmdbuf.PushConstants(*pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
                                  RESCALING_LAYOUT_WORDS_OFFSET, sizeof(rescaling_data),
                                  rescaling_data.data());
+        }
+        if (has_sampler_table) {
+            cmdbuf.PushConstants(*pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
+                                 SAMPLER_TABLE_LAYOUT_OFFSET, sizeof(sampler_table_data),
+                                 sampler_table_data.data());
         }
         if (uses_descriptor_buffer) {
             const u32 buffer_index{};

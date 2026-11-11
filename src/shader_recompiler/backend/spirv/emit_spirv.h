@@ -33,6 +33,15 @@ constexpr u32 RESCALING_LAYOUT_WORDS_OFFSET = offsetof(RescalingLayout, rescalin
 constexpr u32 RESCALING_LAYOUT_DOWN_FACTOR_OFFSET = offsetof(RescalingLayout, down_factor);
 constexpr u32 RENDERAREA_LAYOUT_OFFSET = offsetof(RenderAreaLayout, render_area);
 
+/// Separate samplers (Profile::max_samplers_per_stage): one 4-bit sampler index per sampled
+/// texture of the pipeline, in binding order across its stages, after the layouts above.
+constexpr u32 NUM_SAMPLER_TABLE_WORDS = 32;
+constexpr u32 MAX_SAMPLER_TABLE_SLOTS = NUM_SAMPLER_TABLE_WORDS * 8;
+struct SamplerTableLayout {
+    std::array<u32, NUM_SAMPLER_TABLE_WORDS> sampler_table;
+};
+constexpr u32 SAMPLER_TABLE_LAYOUT_OFFSET = sizeof(RescalingLayout) + sizeof(RenderAreaLayout);
+
 [[nodiscard]] std::vector<u32> EmitSPIRV(const Profile& profile, const RuntimeInfo& runtime_info, IR::Program& program, Bindings& bindings);
 [[nodiscard]] inline std::vector<u32> EmitSPIRV(const Profile& profile, IR::Program& program) {
     Bindings binding;

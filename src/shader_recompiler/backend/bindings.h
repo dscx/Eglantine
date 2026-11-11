@@ -15,6 +15,7 @@ struct Bindings {
     u32 image{};
     u32 texture_scaling_index{};
     u32 image_scaling_index{};
+    u32 texture_slot_index{}; ///< Sampled textures so far, across the pipeline's stages
 };
 
 } // namespace Shader::Backend

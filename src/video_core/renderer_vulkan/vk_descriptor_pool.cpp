@@ -44,18 +44,25 @@ static u32 Accumulate(const Descriptors& descriptors) {
     return count;
 }
 
-static DescriptorBankInfo MakeBankInfo(std::span<const Shader::Info> infos) {
+static DescriptorBankInfo MakeBankInfo(const Device& device, std::span<const Shader::Info> infos) {
     DescriptorBankInfo bank;
+    const u32 max_samplers{device.GetMaxSamplersPerStage()};
     for (const Shader::Info& info : infos) {
         bank.uniform_buffers += Accumulate(info.constant_buffer_descriptors);
         bank.storage_buffers += Accumulate(info.storage_buffers_descriptors);
         bank.texture_buffers += Accumulate(info.texture_buffer_descriptors);
         bank.image_buffers += Accumulate(info.image_buffer_descriptors);
-        bank.textures += Accumulate(info.texture_descriptors);
+        if (Shader::UsesSeparateSamplers(info, max_samplers)) {
+            bank.sampled_images += Accumulate(info.texture_descriptors);
+            bank.samplers += max_samplers;
+        } else {
+            bank.textures += Accumulate(info.texture_descriptors);
+        }
         bank.images += Accumulate(info.image_descriptors);
     }
     bank.score = bank.uniform_buffers + bank.storage_buffers + bank.texture_buffers +
-                 bank.image_buffers + bank.textures + bank.images;
+                 bank.image_buffers + bank.textures + bank.images + bank.sampled_images +
+                 bank.samplers;
     return bank;
 }
 
@@ -132,11 +139,11 @@ DescriptorPool::DescriptorPool(const Device& device_, Scheduler& scheduler) {}
 DescriptorPool::~DescriptorPool() = default;
 
 DescriptorAllocator DescriptorPool::Allocator(const Device& device, Scheduler& scheduler, VkDescriptorSetLayout layout, std::span<const Shader::Info> infos) {
-    return Allocator(device, scheduler, layout, MakeBankInfo(infos));
+    return Allocator(device, scheduler, layout, MakeBankInfo(device, infos));
 }
 
 DescriptorAllocator DescriptorPool::Allocator(const Device& device, Scheduler& scheduler, VkDescriptorSetLayout layout, const Shader::Info& info) {
-    return Allocator(device, scheduler, layout, MakeBankInfo(std::array{info}));
+    return Allocator(device, scheduler, layout, MakeBankInfo(device, std::array{info}));
 }
 
 DescriptorAllocator DescriptorPool::Allocator(const Device& device, Scheduler& scheduler, VkDescriptorSetLayout layout, const DescriptorBankInfo& info) {

@@ -14,6 +14,7 @@
 #include <optional>
 #include <thread>
 #include "common/container/unordered_map.h"
+#include "common/env_gate.h"
 #include "common/container/unordered_set.h"
 #include <utility>
 #include <vector>
@@ -541,6 +542,18 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
         // vegetation drew as white silhouettes.
         has_broken_descriptor_aliasing = true;
         LOG_WARNING(Render_Vulkan, "MoltenVK: descriptor aliasing disabled (Metal slot limits)");
+        // Metal also binds at most 16 samplers per stage and every combined image sampler gets
+        // its own, so a fragment shader with more textures than that fails to compile
+        // ('sampler' attribute parameter is out of bounds): the pipelines Ocarina's vegetation
+        // still lost. Such stages get separate images and a sampler array instead
+        // (EDEN_NX2_SEPARATE_SAMPLERS=0 keeps the combined descriptors).
+        const u32 sampler_slots{properties.properties.limits.maxPerStageDescriptorSamplers};
+        if (sampler_slots <= 16 && Common::EnvGate("EDEN_NX2_SEPARATE_SAMPLERS")) {
+            max_samplers_per_stage = sampler_slots;
+            LOG_WARNING(Render_Vulkan,
+                        "MoltenVK: stages with more than {} textures use separate samplers",
+                        sampler_slots);
+        }
     }
     if (is_qualcomm) {
         must_emulate_scaled_formats = true;
