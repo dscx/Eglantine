@@ -14,6 +14,7 @@
 #include <optional>
 #include <thread>
 #include "common/container/unordered_map.h"
+#include <cstring>
 #include "common/env_gate.h"
 #include "common/container/unordered_set.h"
 #include <utility>
@@ -555,23 +556,25 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
                         sampler_slots);
         }
         // MoltenVK binds push descriptors to discrete Metal slots and never to an argument
-        // buffer, and it advertises 287 of them, so every pipeline here pushed and a stage with
-        // more buffers than Metal has slots (31, less the push constants and MoltenVK's own
-        // buffers) failed to compile ('buffer' attribute parameter is out of bounds): Ocarina's
-        // 31-storage-buffer compute programs and its tessellation stages. Such pipelines use
-        // descriptor sets, which MoltenVK encodes as argument buffers without that limit.
-        // EDEN_NX2_MVK_PUSH_DESCRIPTORS=0 binds every pipeline that way, for comparison.
+        // buffer, and it advertises 287 of them, so every pipeline here pushed and every Metal
+        // slot limit applied: 16 samplers, 31 buffers ('buffer' attribute parameter is out of
+        // bounds: Ocarina's 31-storage-buffer compute programs), 128 textures. Descriptor sets
+        // are encoded as argument buffers without those limits, and three 400 s Ocarina runs
+        // bound that way matched the push-descriptor frame count once MoltenVK's shader cache
+        // was warm, so every pipeline uses them. EDEN_NX2_MVK_PUSH_DESCRIPTORS=1 pushes again
+        // where a stage's buffers fit the slots, for comparison.
         const u32 buffer_slots{properties.properties.limits.maxPerStageDescriptorUniformBuffers};
-        if (!Common::EnvGate("EDEN_NX2_MVK_PUSH_DESCRIPTORS")) {
-            max_push_descriptor_buffers = 0;
-        } else if (buffer_slots <= 32) {
+        const char* const push_env{std::getenv("EDEN_NX2_MVK_PUSH_DESCRIPTORS")};
+        if (push_env != nullptr && std::strcmp(push_env, "0") != 0 && buffer_slots <= 32) {
             max_push_descriptor_buffers = buffer_slots - 4;
-        }
-        if (max_push_descriptor_buffers != ~0u) {
             LOG_WARNING(Render_Vulkan,
                         "MoltenVK: pipelines with more than {} buffers in a stage use descriptor "
-                        "sets",
+                        "sets, the rest push descriptors",
                         max_push_descriptor_buffers);
+        } else {
+            max_push_descriptor_buffers = 0;
+            LOG_WARNING(Render_Vulkan, "MoltenVK: descriptor sets (argument buffers) for every "
+                                       "pipeline, push descriptors unused");
         }
     }
     if (is_qualcomm) {
