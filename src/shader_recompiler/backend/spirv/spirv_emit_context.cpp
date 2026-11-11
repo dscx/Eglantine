@@ -1104,11 +1104,19 @@ void EmitContext::DefineGlobalMemoryFunctions(const IR::Program& program) {
             access(index, ssbo_addr, cond);
         }
     }};
+    // Without descriptor aliasing only the u32 view of each storage buffer exists (see
+    // DefineStorageBuffers), so wider accesses go through it a word at a time.
+    const auto word_access{[&](u32 shift) {
+        if (!profile.support_descriptor_aliasing) {
+            return true;
+        }
+        return SsboAlignFixEnabled() && profile.min_ssbo_alignment < (1U << shift);
+    }};
     const auto define_load{[&](DefPtr ssbo_member, Id element_pointer, Id type, u32 shift) {
         const Id function_type{TypeFunction(type, U64)};
         const Id func_id{OpFunction(type, helper_control, function_type)};
         const Id addr{OpFunctionParameter(U64)};
-        if (shift > 2 && SsboAlignFixEnabled() && profile.min_ssbo_alignment < (1U << shift)) {
+        if (shift > 2 && word_access(shift)) {
             // Bindings are only aligned to min_ssbo_alignment, so read the words of the buffer
             // found for the address instead of a vector view that could start before the access.
             const u32 count = 1U << (shift - 2);
@@ -1139,7 +1147,7 @@ void EmitContext::DefineGlobalMemoryFunctions(const IR::Program& program) {
         const Id func_id{OpFunction(void_id, helper_control, function_type)};
         const Id addr{OpFunctionParameter(U64)};
         const Id data{OpFunctionParameter(type)};
-        if (shift > 2 && SsboAlignFixEnabled() && profile.min_ssbo_alignment < (1U << shift)) {
+        if (shift > 2 && word_access(shift)) {
             const u32 count = 1U << (shift - 2);
             define_body(&StorageDefinitions::U32, addr, storage_types.U32.element, 2,
                         [&](Id, Id ssbo_id, Id word_index) {
