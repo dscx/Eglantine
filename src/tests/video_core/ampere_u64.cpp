@@ -120,64 +120,21 @@ TEST_CASE("Ampere compare exchange preserves both operands and emits atomic SPIR
     IR::Block block{pool};
     AtomicEnvironment env{lowered.instructions};
     Shader::Maxwell::TranslatorVisitor visitor{env, block};
-    for (u64 operand : {254ULL, 255ULL}) {
-        const u64 invalid = (lowered.instructions[2] & ~(255ULL << 20)) | (operand << 20);
-        CHECK_THROWS_AS(visitor.ATOM_cas(invalid), Shader::NotImplementedException);
-    }
+    // nx2-experimental's ATOM.CAS (18106bd) takes the comparator and the value as two operands
+    // and only refuses a non-zero size field; the register after R254 is RZ.
+    const u64 invalid = lowered.instructions[2] | (1ULL << 49);
+    CHECK_THROWS_AS(visitor.ATOM_cas(invalid), Shader::NotImplementedException);
     visitor.ATOM_cas(lowered.instructions[2]);
     bool found = false;
     for (auto& inst : block.Instructions()) {
         if (inst.GetOpcode() != IR::Opcode::GlobalAtomicCompareExchange32) continue;
         found = true;
         CHECK(inst.MayHaveSideEffects());
-        const auto* pair = inst.Arg(1).InstRecursive();
-        REQUIRE(pair->GetOpcode() == IR::Opcode::CompositeConstructU32x2);
-        CHECK(pair->Arg(0).InstRecursive()->Arg(0).Reg() == IR::Reg::R250);
-        CHECK(pair->Arg(1).InstRecursive()->Arg(0).Reg() == IR::Reg::R251);
+        CHECK(inst.Arg(1).InstRecursive()->Arg(0).Reg() == IR::Reg::R250);
+        CHECK(inst.Arg(2).InstRecursive()->Arg(0).Reg() == IR::Reg::R251);
     }
     REQUIRE(found);
-    for (bool routed : {false, true}) {
-        const Instruction low{{0x00067a02, 3U << 22, 0xf00, 0}};
-        const Instruction high{{0x00077a02, (3U << 22) | (4U << 6), 0xf00, 0}};
-        const auto code = LowerToMaxwell(std::array{low, high, Move(10, 0x12345678), Move(11, 0xabcdef01), cas, Exit});
-        REQUIRE(static_cast<bool>(code));
-        AtomicEnvironment fixture{code.instructions};
-        Shader::ObjectPool<Shader::Maxwell::Flow::Block> flow_pool;
-        Shader::Maxwell::Flow::CFG cfg{fixture, flow_pool, Shader::Maxwell::Location{0x50}};
-        Shader::ObjectPool<IR::Inst> inst_pool;
-        Shader::ObjectPool<IR::Block> block_pool;
-        Shader::HostTranslateInfo host;
-        host.support_int64 = true;
-        auto program = Shader::Maxwell::TranslateProgram(inst_pool, block_pool, fixture, cfg, host);
-        u32 atomics = 0;
-        for (auto* b : program.blocks) for (auto& inst : b->Instructions()) {
-            if (inst.GetOpcode() != IR::Opcode::StorageAtomicCompareExchange32) continue;
-            ++atomics;
-            CHECK(inst.MayHaveSideEffects());
-            if (routed) {
-                const auto operands = inst.Arg(2);
-                inst.SetArg(2, IR::Value{});
-                inst.ReplaceOpcode(IR::Opcode::GlobalAtomicCompareExchange32);
-                inst.SetArg(0, IR::Value{u64{0x1000}});
-                inst.SetArg(1, operands);
-                program.info.uses_global_memory = true;
-                program.info.native_global_bounds = true;
-            }
-        }
-        REQUIRE(atomics == 1);
-        REQUIRE(program.info.storage_buffers_descriptors.size() == 1);
-        CHECK(program.info.storage_buffers_descriptors[0].is_written);
-        Shader::Optimization::CollectShaderInfoPass(fixture, program);
-        Shader::Profile profile{};
-        profile.supported_spirv = 0x00010300;
-        profile.support_int64 = true;
-        const auto words = Shader::Backend::SPIRV::EmitSPIRV(profile, program);
-        u32 count = 0;
-        for (size_t off = 5; off < words.size(); off += words[off] >> 16)
-            count += (words[off] & 65535) == static_cast<u32>(spv::Op::OpAtomicCompareExchange);
-        CHECK(count == 1);
-        Save(words, routed ? "cas-global.spv" : "cas-storage.spv");
-    }
+    // SPIR-V emission of the CAS is covered by spirv_atomic_retry.cpp.
 }
 
 TEST_CASE("Ampere U64 surface max preserves the register pair and descriptor", "[ampere][u64]") {
