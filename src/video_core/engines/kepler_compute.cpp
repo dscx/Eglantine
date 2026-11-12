@@ -938,7 +938,11 @@ bool KeplerCompute::EmulatesNativeTensorPrograms() const {
     // title 4's network takes the host driver minutes to compile). Chosen per title, not per
     // dispatch: the shader cache keeps the result of a program's first dispatch.
     constexpr u64 DonkeyKongBananzaProgramId = 0x040074A01BF12000ULL;
-    return Settings::GetCurrentProgramID() == DonkeyKongBananzaProgramId ||
+    // Tears of the Kingdom's cutscene video network is emulated too: the stand-in leaves the
+    // movies black.
+    constexpr u64 TearsOfTheKingdomProgramId = 0x0400F2C0115B6001ULL;
+    const u64 program_id = Settings::GetCurrentProgramID();
+    return program_id == DonkeyKongBananzaProgramId || program_id == TearsOfTheKingdomProgramId ||
            UsesCompactTensorPrograms();
 }
 
