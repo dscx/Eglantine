@@ -25,6 +25,7 @@ template <typename T, typename Id = u32>
 class DescriptorTable {
 public:
     [[nodiscard]] bool Synchronize(GPUVAddr gpu_addr, u32 limit) noexcept {
+        limit = (std::min)(limit, MaxLimit);
         bool ret = !(current_gpu_addr == gpu_addr && current_limit == limit);
         if (ret) {
             Refresh(gpu_addr, limit);
@@ -100,10 +101,10 @@ public:
 
     void Refresh(GPUVAddr gpu_addr, u32 limit) noexcept {
         current_gpu_addr = gpu_addr;
-        current_limit = limit;
+        current_limit = (std::min)(limit, MaxLimit);
         // Mario Brothership reallocates a lot of times, so use aggressive pre-alloc sizes
         // std::vector<T> by default uses quadratic growth, but that isn't even enough to satisfy brothership
-        const size_t num_descriptors = ((limit + 0x80000) & (~0x7ffff)) + 1;
+        const size_t num_descriptors = ((current_limit + 0x80000) & (~0x7ffff)) + 1;
         read_descriptors.resize(Common::DivCeil(num_descriptors, 64U));
         ClearReadDescriptors();
         invalidated = false;
@@ -118,6 +119,10 @@ public:
     GPUVAddr current_gpu_addr{};
     u32 current_limit{};
     bool invalidated{}; ///< read_descriptors is to be cleared before the next read
+
+    /// SET_TEX_HEADER_POOL_C_MAXIMUM_INDEX is a 22-bit field (the sampler pool's is 20 bits), so
+    /// a larger limit is a guest bug, not a request for 2^32 descriptors.
+    static constexpr u32 MaxLimit = (1U << 22) - 1;
 
 private:
     static constexpr size_t PageCacheSize = 16;

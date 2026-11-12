@@ -25,6 +25,16 @@ struct DescriptorMemory {
         std::memcpy(output, reinterpret_cast<const u8*>(banks[bank].data()) + offset, size);
     }
 };
+
+struct AddressMemory {
+    const u8* GetPointer(GPUVAddr) const {
+        return nullptr;
+    }
+
+    void ReadBlockUnsafe(GPUVAddr address, void* output, size_t size) const {
+        std::memcpy(output, &address, size);
+    }
+};
 } // namespace
 
 TEST_CASE("Descriptor invalidation matches eager refresh across mutations", "[descriptor_table]") {
@@ -105,15 +115,7 @@ TEST_CASE("Repeated image deletion cannot reuse stale descriptor view IDs", "[de
 }
 
 TEST_CASE("Descriptor limits clear exposed slots after shrink and growth", "[descriptor_table]") {
-    struct AddressMemory {
-        const u8* GetPointer(GPUVAddr) const {
-            return nullptr;
-        }
-
-        void ReadBlockUnsafe(GPUVAddr address, void* output, size_t size) const {
-            std::memcpy(output, &address, size);
-        }
-    } memory;
+    AddressMemory memory;
     constexpr std::array<u32, 9> limits{0, 63, 64, 127, 128, 0x7ffff, 0x80000, 0x80001, 0x100000};
     for (const u32 limit : limits) {
         VideoCommon::DescriptorTable<u64> table;
@@ -141,6 +143,20 @@ TEST_CASE("Descriptor limits clear exposed slots after shrink and growth", "[des
         CHECK(table.Read(memory, 0).second);
         CHECK_FALSE(table.Read(memory, 0).second);
     }
+}
+
+TEST_CASE("Descriptor limits above the register field are clamped", "[descriptor_table]") {
+    using Table = VideoCommon::DescriptorTable<u64>;
+    AddressMemory memory;
+    Table table;
+    REQUIRE(table.Synchronize(0x1000, std::numeric_limits<u32>::max()));
+    CHECK(table.current_limit == Table::MaxLimit);
+    CHECK(table.descriptors.size() > Table::MaxLimit);
+    CHECK_FALSE(table.Synchronize(0x1000, std::numeric_limits<u32>::max()));
+    CHECK_FALSE(table.Synchronize(0x1000, Table::MaxLimit));
+    CHECK(table.Read(memory, Table::MaxLimit).second);
+    CHECK_FALSE(table.Read(memory, Table::MaxLimit).second);
+    CHECK(table.Synchronize(0x1000, Table::MaxLimit - 1));
 }
 
 TEST_CASE("Descriptor invalidation CPU benchmark", "[.][cache_bench]") {
