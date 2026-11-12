@@ -466,8 +466,9 @@ size_t KMemoryManager::Impl::Initialize(KPhysicalAddress address, size_t size,
     // Setup region.
     m_pool = p;
     m_management_region = management;
-    m_page_reference_counts.resize(
-        Kernel::Board::Nintendo::Nx::KSystemControl::Init::GetIntendedMemorySize() / PageSize);
+    // Indexed by page offset into this manager's region, so its own size is enough (sized for
+    // all of DRAM, each of the managers held ~10 MiB with the 20 GiB Switch 2 layout).
+    m_page_reference_counts.resize(size / PageSize);
     ASSERT(Common::IsAligned(GetInteger(m_management_region), PageSize));
 
     // Initialize the manager's KPageHeap.
