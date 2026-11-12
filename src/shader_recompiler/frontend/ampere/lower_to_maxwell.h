@@ -3053,7 +3053,8 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 (bindless && offset_mode == 2) ||
                 (offset_mode && source_b == 255) ||
                 (source_a != 255 &&
-                 source_a + in_a > ((array || meta) ? shadow_boundary : 246U)) || (source_b != 255 && source_b + in_b > 246) ||
+                 source_a + in_a > ((array || meta) ? shadow_boundary : 246U)) ||
+                (source_b != 255 && source_b + in_b > shadow_boundary) ||
                 insn.Bits(89, 1) || mask == 0 ||
                 (bindless ? (handle >= 246 ||
                              (register_handle ? insn.Bits(40, 19) || insn.Bits(91, 1)
