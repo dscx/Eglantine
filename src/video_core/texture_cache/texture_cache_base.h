@@ -328,8 +328,8 @@ public:
     bool TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& dst,
                          const Tegra::Engines::Fermi2D::Surface& src,
                          const Tegra::Engines::Fermi2D::Surface& motion_vectors,
-                         const Tegra::Texture::TICEntry* depth, std::array<f32, 2> jitter,
-                         std::array<f32, 2> motion_scale);
+                         const Tegra::Texture::TICEntry* depth, bool depth_reversed,
+                         std::array<f32, 2> jitter, std::array<f32, 2> motion_scale);
 
     /// NVIDIA DLSS (DLAA or Super Resolution) on src into dst with the scene depth at
     /// depth_address and motion from the camera (see the runtime's UpscaleWithCameraMotion).

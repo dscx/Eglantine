@@ -1703,7 +1703,7 @@ std::optional<VideoCore::GameDlssProbe> TextureCacheRuntime::ProbeGameDlssOutput
 
 bool TextureCacheRuntime::UpscaleWithFsr3(Framebuffer* dst_framebuffer, ImageView& input_color,
                                           ImageView& motion_vectors, ImageView& depth,
-                                          std::array<u32, 2> render_size,
+                                          bool depth_reversed, std::array<u32, 2> render_size,
                                           std::array<f32, 2> jitter,
                                           std::array<f32, 2> motion_scale) {
     if (!WantsTemporalUpscaleDepth()) {
@@ -1719,8 +1719,8 @@ bool TextureCacheRuntime::UpscaleWithFsr3(Framebuffer* dst_framebuffer, ImageVie
     const bool reset = !fsr3_last_evaluation || frame_time_ms > 250.0f;
     fsr3_last_evaluation = now;
 #ifdef EGLANTINE_STREAMLINE
-    if (UpscaleWithDlss(dst_framebuffer, input_color, motion_vectors, depth, render_size, jitter,
-                        motion_scale, reset)) {
+    if (UpscaleWithDlss(dst_framebuffer, input_color, motion_vectors, depth, depth_reversed,
+                        render_size, jitter, motion_scale, reset)) {
         return true;
     }
 #endif
@@ -1755,7 +1755,9 @@ bool TextureCacheRuntime::UpscaleWithFsr3(Framebuffer* dst_framebuffer, ImageVie
     }
     fsr3_upscaler->Upscale({
         .color = input_color.Handle(Shader::TextureType::Color2D),
+        .upscale_alpha = VideoCore::Surface::HasAlpha(input_color.format),
         .depth = depth.DepthView(),
+        .depth_reversed = depth_reversed,
         .motion_vectors = motion_vectors.Handle(Shader::TextureType::Color2D),
         .render_size = {render_size[0], render_size[1]},
         .upscale_size = extent,
@@ -1865,7 +1867,7 @@ StreamlineDlssUpscaler::Image DlssImage(const Device& device, ImageView& view, V
 
 bool TextureCacheRuntime::UpscaleWithDlss(Framebuffer* dst_framebuffer, ImageView& input_color,
                                           ImageView& motion_vectors, ImageView& depth,
-                                          std::array<u32, 2> render_size,
+                                          bool depth_reversed, std::array<u32, 2> render_size,
                                           std::array<f32, 2> jitter,
                                           std::array<f32, 2> motion_scale, bool reset) {
     if (!DlssUpscaler()) {
@@ -1888,6 +1890,7 @@ bool TextureCacheRuntime::UpscaleWithDlss(Framebuffer* dst_framebuffer, ImageVie
         .motion_vector_scale = {motion_scale[0] * static_cast<f32>(render_size[0]),
                                 motion_scale[1] * static_cast<f32>(render_size[1])},
         .reset = reset,
+        .depth_inverted = depth_reversed,
     });
     if (!upscaled) {
         dlss_unsupported = true;
@@ -1981,14 +1984,15 @@ bool TextureCacheRuntime::UpscaleWithCameraMotion(Framebuffer* dst_framebuffer,
 
 bool TextureCacheRuntime::TemporalUpscale(Framebuffer* dst_framebuffer, ImageView& dst,
                                           ImageView& input_color, ImageView& motion_vectors,
-                                          ImageView* depth, std::array<u32, 2> render_size,
+                                          ImageView* depth, bool depth_reversed,
+                                          std::array<u32, 2> render_size,
                                           std::array<f32, 2> jitter,
                                           std::array<f32, 2> motion_scale) {
     if (dst.Samples() != VK_SAMPLE_COUNT_1_BIT || ImageAspectMask(dst.format) != VK_IMAGE_ASPECT_COLOR_BIT) {
         return false;
     }
-    if (depth && UpscaleWithFsr3(dst_framebuffer, input_color, motion_vectors, *depth, render_size,
-                                 jitter, motion_scale)) {
+    if (depth && UpscaleWithFsr3(dst_framebuffer, input_color, motion_vectors, *depth,
+                                 depth_reversed, render_size, jitter, motion_scale)) {
         return true;
     }
     const VkFormat format =
