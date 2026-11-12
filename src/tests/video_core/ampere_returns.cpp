@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <array>
-#include <utility>
 #include <algorithm>
 #include <bit>
+#include <utility>
 #include <catch2/catch_test_macros.hpp>
 
 #include "shader_recompiler/frontend/ampere/lower_to_maxwell.h"
@@ -13,18 +13,6 @@ namespace {
 using Shader::Ampere::Instruction;
 using Shader::Ampere::LowerToMaxwell;
 
-TEST_CASE("Ampere IMMA cannot overwrite any word containing a return link", "[ampere]") {
-    for (u32 link : {41U, 42U, 43U}) {
-        const std::array<Instruction, 5> code{{
-            {{0x00007802U | (link << 16), 0x20, 0xf00, 0}},
-            {{0x00007944, 0x10, 0x03c00000, 0}},
-            {{0x0000794d, 0, 0x03800000, 0}},
-            {{0x08287237, 12, 0x00405cff, 0}},
-            {{0x00007950U | (link << 24), 0xffffffb0, 0x03c3ffff, 0}},
-        }};
-        const auto lowered = LowerToMaxwell(code);
-        CHECK_FALSE(static_cast<bool>(lowered));
-        CHECK(lowered.error == "native callee overwrites link register");
 /// Evaluates the lowered reduction instructions for a supplied active-lane mask.
 /// Returns the value in the uniform destination and fails the test on unsupported instructions.
 u32 EvaluateRedux(const Shader::Ampere::LoweredProgram& program,
@@ -134,7 +122,8 @@ TEST_CASE("Ampere signed global reductions retain their uniform address and pred
     REQUIRE(((reduction >> 48) & 1) == 1); // 64-bit address
 
     // The operand type (bits 73-75) carries over unchanged for values 0-5; 6 and 7 are rejected.
-    // U64 (2) and S64 (5) need an even source register (R2 here; R1 is rejected).
+    // U64 (2) and S64 (5) need an even source register (R2 here; R1 is rejected). The float
+    // types (3, 4) lower only as ADD, as the Maxwell frontend reduces F32, so MIN is rejected.
     for (u32 type = 0; type < 8; ++type) {
         CAPTURE(type);
         const auto typed = [&](u32 source) {
@@ -144,7 +133,7 @@ TEST_CASE("Ampere signed global reductions retain their uniform address and pred
             }};
         };
         const auto result = LowerToMaxwell(typed(2));
-        if (type > 5) {
+        if (type > 5 || type == 3 || type == 4) {
             REQUIRE_FALSE(static_cast<bool>(result));
             continue;
         }
@@ -181,6 +170,21 @@ TEST_CASE("Ampere register-address reductions preserve signed byte offsets", "[v
         const Instruction reduce{{0x0c00798e, 17U | ((static_cast<u32>(offset) & 0xffffffU) << 8),
                                    0x0010e100, 0}};
         REQUIRE_FALSE(static_cast<bool>(LowerToMaxwell(std::array{reduce, exit})));
+    }
+}
+
+TEST_CASE("Ampere IMMA cannot overwrite any word containing a return link", "[ampere]") {
+    for (u32 link : {41U, 42U, 43U}) {
+        const std::array<Instruction, 5> code{{
+            {{0x00007802U | (link << 16), 0x20, 0xf00, 0}},
+            {{0x00007944, 0x10, 0x03c00000, 0}},
+            {{0x0000794d, 0, 0x03800000, 0}},
+            {{0x08287237, 12, 0x00405cff, 0}},
+            {{0x00007950U | (link << 24), 0xffffffb0, 0x03c3ffff, 0}},
+        }};
+        const auto lowered = LowerToMaxwell(code);
+        CHECK_FALSE(static_cast<bool>(lowered));
+        CHECK(lowered.error == "native callee overwrites link register");
     }
 }
 

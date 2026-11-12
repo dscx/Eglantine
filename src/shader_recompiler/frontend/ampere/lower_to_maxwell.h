@@ -101,6 +101,15 @@ inline RegisterPressure PrepareRegisterPressure(const Instruction& input, u32 re
     case 0x619: operand(16); operand(64); break;
     case 0x419: operand(16); operand(64); break;
     case 0x306: case 0x308: operand(16); operand(32); break; // I2F, MUFU
+    case 0x310:
+        operand(16, input.Bits(75, 2) == 3 ? 2 : 1);
+        operand(32, input.Bits(84, 2) == 3 ? 2 : 1); break;
+    case 0xa28: operand(16, 2); operand(24, 2); break;
+    case 0x228: operand(16, 2); operand(24, 2); operand(32, 2); break;
+    case 0x22b: operand(16, 2); operand(24, 2); operand(32, 2); operand(64, 2); break;
+    case 0xa2b: case 0x62b: case 0x229:
+        operand(16, 2); operand(24, 2); operand(64, 2); break;
+    case 0x629: operand(16, 2); operand(24, 2); break;
     case 0x433: case 0x633: operand(16); operand(24); break;
     case 0x220: case 0x221: operand(16); operand(24); operand(32); break;
     case 0x421: case 0x817: case 0x820: operand(16); operand(24); break;
@@ -235,7 +244,7 @@ inline RegisterPressure PrepareRegisterPressure(const Instruction& input, u32 re
     }
     case 0x98e:
         operand(24, 2);
-        operand(32);
+        operand(32, input.Bits(73, 3) == 2 || input.Bits(73, 3) == 5 ? 2 : 1);
         break;
     case 0x381: { // LDG with a 64-bit address
         const u32 width = input.Bits(73, 3), count = width == 6 ? 4 : width == 5 ? 2 : 1;
@@ -428,7 +437,9 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                                         opcode == 0x59f || opcode == 0x3a0 ||
                                         (opcode & 0x1ff) == 0x00c || (opcode & 0x1ff) == 0x00b;
             const bool pair = opcode == 0x225 || opcode == 0x625 || opcode == 0x825 ||
-                              ((opcode == 0x593 || opcode == 0x394) && insn.Bits(73, 3) == 2);
+                              ((opcode == 0x593 || opcode == 0x394) && insn.Bits(73, 3) == 2) ||
+                              (opcode == 0x310 && insn.Bits(75, 2) == 3) || opcode == 0xa28 || opcode == 0x228 ||
+                              opcode == 0x22b || opcode == 0xa2b || opcode == 0x62b || opcode == 0x229 || opcode == 0x629;
             if (active_link && !no_destination &&
                 (insn.Bits(16, 8) == *active_link || (pair && insn.Bits(16, 8) + 1 == *active_link) ||
                  (opcode == 0x237 && *active_link > insn.Bits(16, 8) && *active_link < insn.Bits(16, 8) + 4)) &&
@@ -820,6 +831,71 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                  (u64{251} << 20) | (u64{1} << 41) | (u64{7} << 48));
         };
         switch (opcode) {
+        case 0x22b: { // DFMA with register operands and no absolute modifiers.
+            const u32 a = insn.Bits(24, 8), b = insn.Bits(32, 8), c = insn.Bits(64, 8);
+            if ((insn.words[2] & ~0xc9ffU) || (insn.words[1] & ~0x800000ffU) || (dest & 1) ||
+                dest >= 254 || (a & 1) || a >= 254 || (b & 1) || b >= 254 || (c & 1) || c >= 254)
+                return fail(index, "native double fused multiply-add mode");
+            emit(base(0x5b70000000000000ULL) | (u64{a} << 8) | (u64{b} << 20) | (u64{c} << 39) |
+                 (u64{insn.Bits(72, 1) ^ insn.Bits(63, 1)} << 48) |
+                 (u64{insn.Bits(75, 1)} << 49) | (u64{insn.Bits(78, 2)} << 50));
+            break;
+        }
+        case 0xa2b: case 0x62b: { // DFMA with the multiplier or addend in a constant buffer.
+            const u32 a = insn.Bits(24, 8), reg = insn.Bits(64, 8);
+            if ((insn.words[2] & ~0xc9ffU) || insn.Bits(62, 1) || !valid_cbuf() ||
+                (insn.Bits(38, 16) % 8) || (dest & 1) || dest >= 254 ||
+                (a & 1) || a >= 254 || (reg & 1) || reg >= 254)
+                return fail(index, "native double fused multiply-add mode");
+            const bool constant_multiplier = opcode == 0xa2b;
+            const u32 negate_b = insn.Bits(72, 1) ^ insn.Bits(constant_multiplier ? 63 : 75, 1);
+            const u32 negate_c = insn.Bits(constant_multiplier ? 75 : 63, 1);
+            emit(base(constant_multiplier ? 0x4b70000000000000ULL : 0x5370000000000000ULL) |
+                 (u64{a} << 8) | cbuf() | (u64{reg} << 39) |
+                 (u64{negate_b} << 48) | (u64{negate_c} << 49) | (u64{insn.Bits(78, 2)} << 50));
+            break;
+        }
+        case 0x229: case 0x629: { // DADD with a register or constant-buffer second operand.
+            const u32 a = insn.Bits(24, 8), b = insn.Bits(64, 8);
+            const bool constant = opcode == 0x629;
+            if ((insn.words[2] & ~(constant ? 0xc300U : 0xcfffU)) || (dest & 1) || dest >= 254 ||
+                (a & 1) || a >= 254 || (constant ? (!valid_cbuf() || insn.Bits(38, 16) % 8)
+                                                         : (insn.words[1] || (b & 1) || b >= 254)))
+                return fail(index, "native double add mode");
+            emit(base(constant ? 0x4c70000000000000ULL : 0x5c70000000000000ULL) |
+                 (u64{a} << 8) | (constant ? cbuf() : u64{b} << 20) |
+                 (u64{insn.Bits(78, 2)} << 39) | (u64{insn.Bits(72, 1)} << 48) |
+                 (u64{insn.Bits(73, 1)} << 46) |
+                 (u64{insn.Bits(constant ? 63 : 75, 1)} << 45) |
+                 (u64{insn.Bits(constant ? 62 : 74, 1)} << 49));
+            break;
+        }
+        case 0xa28: case 0x228: { // DMUL with a constant-buffer or register operand and no absolute modifiers.
+            const u32 a = insn.Bits(24, 8), b = insn.Bits(32, 8);
+            const bool constant = opcode == 0xa28;
+            if ((insn.words[2] & ~0xc100U) || insn.Bits(62, 1) || (dest & 1) || dest >= 254 ||
+                (a & 1) || a >= 254 ||
+                (constant ? (!valid_cbuf() || insn.Bits(38, 16) % 8)
+                          : ((insn.words[1] & ~0x800000ffU) || (b & 1) || b >= 254)))
+                return fail(index, "native double multiply mode");
+            emit(base(constant ? 0x4c80000000000000ULL : 0x5c80000000000000ULL) | (u64{a} << 8) |
+                 (constant ? cbuf() : u64{b} << 20) | (u64{insn.Bits(78, 2)} << 39) |
+                 (u64{insn.Bits(72, 1) ^ insn.Bits(63, 1)} << 48));
+            break;
+        }
+        case 0x310: { // F2F between F32 and F64; the double operand is an aligned register pair.
+            const u32 source = insn.Bits(32, 8), dst_size = insn.Bits(75, 2), src_size = insn.Bits(84, 2);
+            const bool widening = dst_size == 3 && src_size == 2;
+            const bool narrowing = dst_size == 2 && src_size == 3;
+            if ((!widening && !narrowing) || insn.Bits(24, 8) || (insn.words[1] & ~0xc00000ffU) ||
+                (insn.words[2] & ~0x0030d800U) ||
+                (widening ? ((dest & 1) || dest >= 254) : ((source & 1) || source >= 254)))
+                return fail(index, "native double conversion mode");
+            emit(base(0x5ca8000000000000ULL) | (u64{dst_size} << 8) | (u64{src_size} << 10) |
+                 (u64{source} << 20) | (u64{insn.Bits(62, 1)} << 49) |
+                 (u64{insn.Bits(63, 1)} << 45) | (u64{insn.Bits(78, 2)} << 39));
+            break;
+        }
         case 0x304: case 0xb04: { // F2F.F16.F32, scalar round-to-nearest conversion.
             // 0xb04 reads c[bank][offset], |.| and - in bits 62-63 as for the register form (ptxas:
             // cvt.rn.f16.f32 of a negated parameter is F2F.F16.F32 Rd, -c[0x0][0x170]).
@@ -1591,8 +1667,10 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             const u32 variable = 0x03800e00U | (uniform_address ? 0x3fU : 0U);
             const u32 mode = uniform_address ? 0x0c10e100U : 0x0010e100U;
             const s32 offset = static_cast<s32>(insn.Bits(40, 24) << 8) >> 8;
-            if ((insn.words[2] & ~variable) != mode ||
-                (type != 0 && type != 1 && type != 3 && type != 4) ||
+            // U64 (2) and S64 (5) take an aligned register pair below the lowering's scratch.
+            const bool wide = type == 2 || type == 5;
+            if ((insn.words[2] & ~variable) != mode || type > 5 ||
+                (wide && ((insn.Bits(32, 8) & 1) || insn.Bits(32, 8) >= 250)) ||
                 ((type == 3 || type == 4) && operation != 0))
                 return fail(index, "native global reduction mode");
             const u32 address = uniform_address ? uniform_register(insn.Bits(64, 6))

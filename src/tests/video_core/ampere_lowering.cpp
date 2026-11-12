@@ -64,7 +64,8 @@ TEST_CASE("Ampere register SGXT clamps the full bit count before extraction", "[
             }
         }
     }
-    for (const u32 unsupported : {0x200U, 0x800U}) { // Signed and wrapping forms.
+    // The signed form (0x200) lowers to a signed BFE here; the wrapping form is still rejected.
+    for (const u32 unsupported : {0x800U}) {
         const Instruction extend{{0x1510721a, 16, unsupported, 0}};
         REQUIRE_FALSE(static_cast<bool>(LowerToMaxwell(std::array{extend, EXIT})));
     }

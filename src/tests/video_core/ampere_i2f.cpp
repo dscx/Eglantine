@@ -86,6 +86,8 @@ TEST_CASE("Ampere I2F.F16 converts 32-bit integer sources", "[video_core][ampere
     CHECK_FALSE(static_cast<bool>(lower({{0x00067306, 0x10000006, 0x00200800, 0}}))); // Selector.
     CHECK_FALSE(static_cast<bool>(lower({{0x00067306, 0x00000006, 0x00204800, 0}}))); // Rounding.
     CHECK_FALSE(static_cast<bool>(lower({{0x00067306, 0x00000006, 0x00201000, 0}}))); // F32 result.
+}
+
 /// Checks uniform I2F signedness and half selection, and rejects invalid uniform operands.
 TEST_CASE("Ampere I2F converts either half of signed and unsigned uniform words", "[video_core][ampere]") {
     for (const bool is_signed : {false, true}) {
