@@ -1399,6 +1399,11 @@ bool Device::GetSuitability(bool requires_swapchain) {
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
         SetNext(next, properties.cooperative_matrix);
     }
+    if (supported_extensions.contains(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME)) {
+        properties.integer_dot_product.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES;
+        SetNext(next, properties.integer_dot_product);
+    }
 
     // Perform the property fetch.
     physical.GetProperties2(properties2);
@@ -1723,8 +1728,14 @@ void Device::RemoveUnsuitableExtensions() {
     // 32-lane warp. The matrices hold 16-bit floats, so the device needs shaderFloat16. Shaders
     // with them use the Vulkan memory model and run with full subgroups.
     {
+        // The instance may expose the entry point when the selected device lacks the extension;
+        // query only devices that have it.
+        std::vector<VkCooperativeMatrixPropertiesKHR> shapes;
+        if (extensions.cooperative_matrix) {
+            shapes = physical.GetCooperativeMatrixPropertiesKHR();
+        }
         const bool has_shape = std::ranges::any_of(
-            physical.GetCooperativeMatrixPropertiesKHR(),
+            shapes,
             [](const VkCooperativeMatrixPropertiesKHR& shape) {
                 return shape.MSize == 16 && shape.NSize == 8 && shape.KSize == 16 &&
                        shape.AType == VK_COMPONENT_TYPE_FLOAT16_KHR &&
@@ -1734,8 +1745,22 @@ void Device::RemoveUnsuitableExtensions() {
                        shape.saturatingAccumulation == VK_FALSE &&
                        shape.scope == VK_SCOPE_SUBGROUP_KHR;
             });
+        // AMD's drivers expose the extension on GCN, RDNA1 and RDNA2 too, which have no matrix
+        // units: there the shapes run as emulation, slower than the shader fallback (lichii #657).
+        // RDNA3 and later accelerate mixed-signedness dot4, which the driver reports.
+        const VkDriverId coop_driver_id = properties.driver.driverID;
+        const bool emulated_amd_matrices =
+            (coop_driver_id == VK_DRIVER_ID_AMD_PROPRIETARY ||
+             coop_driver_id == VK_DRIVER_ID_AMD_OPEN_SOURCE) &&
+            !properties.integer_dot_product.integerDotProduct4x8BitPackedMixedSignednessAccelerated;
+        if (extensions.cooperative_matrix && emulated_amd_matrices) {
+            LOG_INFO(Render_Vulkan,
+                     "VK_KHR_cooperative_matrix is emulated on this AMD GPU: guest tensor "
+                     "operations stay in shader emulation");
+        }
         extensions.cooperative_matrix =
-            extensions.cooperative_matrix && features.cooperative_matrix.cooperativeMatrix &&
+            extensions.cooperative_matrix && !emulated_amd_matrices &&
+            features.cooperative_matrix.cooperativeMatrix &&
             has_shape &&
             (properties.cooperative_matrix.cooperativeMatrixSupportedStages &
              VK_SHADER_STAGE_COMPUTE_BIT) != 0 &&
