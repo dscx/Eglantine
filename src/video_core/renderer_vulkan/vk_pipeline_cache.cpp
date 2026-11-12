@@ -2131,6 +2131,23 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
     bool build_in_parallel, bool native_turing) try {
     auto hash = key.Hash();
     LOG_DEBUG(Render_Vulkan, "{:#016x}", hash);
+    // EDEN_NX2_PIPE_TRACE=1: name each pipeline before and after its build, so the one that never
+    // returns (a codegen loop or a driver hang) is the start line without a done line.
+    static const bool pipe_trace = std::getenv("EDEN_NX2_PIPE_TRACE") != nullptr;
+    const auto trace_begin = std::chrono::steady_clock::now();
+    bool trace_built = false;
+    if (pipe_trace) {
+        LOG_INFO(Render_Vulkan, "PIPE start {:016x} shaders={:016x} on {}", hash,
+                 fmt::join(key.unique_hashes, " "), build_in_parallel ? "gpu-thread" : "worker");
+    }
+    SCOPE_EXIT {
+        if (pipe_trace) {
+            LOG_INFO(Render_Vulkan, "PIPE done {:016x} ok={} ms={:.1f}", hash, trace_built,
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                               trace_begin)
+                         .count());
+        }
+    };
     size_t env_index{0};
     std::array<Shader::IR::Program, Maxwell::MaxShaderProgram> programs;
     const bool uses_vertex_a{key.unique_hashes[0] != 0};
@@ -2487,6 +2504,7 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
     }
     Common::ThreadWorker* const thread_worker{build_in_parallel ? &workers : nullptr};
     PhaseTimer object_timer{BuildPhase::Object, build_in_parallel};
+    trace_built = true;
     return std::make_unique<GraphicsPipeline>(
         scheduler, buffer_cache, texture_cache, vulkan_pipeline_cache, &shader_notify, device,
         descriptor_pool, guest_descriptor_queue, descriptor_buffer_ring, thread_worker, statistics,
