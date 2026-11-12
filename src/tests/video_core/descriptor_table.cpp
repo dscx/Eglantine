@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstring>
@@ -8,6 +9,7 @@
 #include <random>
 #include <catch2/catch_test_macros.hpp>
 #include "video_core/texture_cache/descriptor_table.h"
+#include "video_core/textures/texture.h"
 
 namespace {
 struct DescriptorMemory {
@@ -35,6 +37,18 @@ struct AddressMemory {
         std::memcpy(output, &address, size);
     }
 };
+
+// Reserved capacity past the limit is not addressable and may keep stale marks.
+template <typename Table>
+bool ExposedReadMarksClear(const Table& table) {
+    const size_t words = size_t{table.current_limit} / 64 + 1;
+    for (size_t word = 0; word < words; ++word) {
+        if (table.read_descriptors[word] != 0) {
+            return false;
+        }
+    }
+    return true;
+}
 } // namespace
 
 TEST_CASE("Descriptor invalidation matches eager refresh across mutations", "[descriptor_table]") {
@@ -157,6 +171,42 @@ TEST_CASE("Descriptor limits above the register field are clamped", "[descriptor
     CHECK(table.Read(memory, Table::MaxLimit).second);
     CHECK_FALSE(table.Read(memory, Table::MaxLimit).second);
     CHECK(table.Synchronize(0x1000, Table::MaxLimit - 1));
+}
+
+TEST_CASE("Descriptor tables grow without reserving large unused ranges", "[descriptor_table]") {
+    VideoCommon::DescriptorTable<Tegra::Texture::TICEntry> table;
+    constexpr std::array<u32, 7> limits{0, 1, 63, 64, 255, 1024, 0xfffff};
+    for (const u32 limit : limits) {
+        table.Refresh(0x1000, limit);
+        REQUIRE(table.descriptors.size() >= size_t{limit} + 1);
+        REQUIRE(table.descriptors.size() <= (size_t{limit} + 1) * 2);
+        REQUIRE(table.bound_ids.size() == table.descriptors.size());
+        REQUIRE(table.read_descriptors.size() * 64 >= table.descriptors.size());
+        REQUIRE(ExposedReadMarksClear(table));
+        std::ranges::fill(table.read_descriptors, ~u64{0});
+    }
+}
+
+TEST_CASE("Refreshing a descriptor table clears old marks and keeps its storage",
+          "[descriptor_table]") {
+    VideoCommon::DescriptorTable<Tegra::Texture::TICEntry> table;
+    table.Refresh(0x1000, 255);
+    REQUIRE(table.descriptors.size() * sizeof(Tegra::Texture::TICEntry) <= 16 * 1024);
+    std::ranges::fill(table.read_descriptors, ~u64{0});
+    std::ranges::fill(table.bound_ids, 7U);
+    REQUIRE_FALSE(table.Synchronize(0x1000, 255));
+    REQUIRE_FALSE(ExposedReadMarksClear(table));
+
+    const Tegra::Texture::TICEntry* const storage = table.descriptors.data();
+    REQUIRE(table.Synchronize(0x2000, 127));
+    REQUIRE(table.descriptors.data() == storage);
+    REQUIRE(ExposedReadMarksClear(table));
+    REQUIRE(std::all_of(table.bound_ids.begin(), table.bound_ids.begin() + 128,
+                        [](u32 id) { return id == 0; }));
+    std::ranges::fill(table.read_descriptors, ~u64{0});
+    REQUIRE(table.Synchronize(0x2000, 1024));
+    REQUIRE(table.descriptors.size() >= 1025);
+    REQUIRE(ExposedReadMarksClear(table));
 }
 
 TEST_CASE("Descriptor invalidation CPU benchmark", "[.][cache_bench]") {

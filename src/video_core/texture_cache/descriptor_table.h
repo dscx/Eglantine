@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstring>
 #include <vector>
 
@@ -102,15 +103,17 @@ public:
     void Refresh(GPUVAddr gpu_addr, u32 limit) noexcept {
         current_gpu_addr = gpu_addr;
         current_limit = (std::min)(limit, MaxLimit);
-        // Mario Brothership reallocates a lot of times, so use aggressive pre-alloc sizes
-        // std::vector<T> by default uses quadratic growth, but that isn't even enough to satisfy brothership
-        const size_t num_descriptors = ((current_limit + 0x80000) & (~0x7ffff)) + 1;
-        read_descriptors.resize(Common::DivCeil(num_descriptors, 64U));
         ClearReadDescriptors();
         invalidated = false;
-        //
-        descriptors.resize(num_descriptors);
-        bound_ids.resize(num_descriptors, Id{0});
+        // Grow geometrically and keep the storage on a smaller limit: most tables hold a few
+        // hundred 32-byte entries, not the 16 MiB a fixed pre-allocation reserved for each, and
+        // Mario Brothership, which changes limits constantly, then reallocates only on growth.
+        const size_t num_descriptors = std::bit_ceil(size_t{current_limit} + 1);
+        if (descriptors.size() < num_descriptors) {
+            read_descriptors.resize(Common::DivCeil(num_descriptors, 64U));
+            descriptors.resize(num_descriptors);
+            bound_ids.resize(num_descriptors, Id{0});
+        }
     }
 
     std::vector<u64> read_descriptors;
