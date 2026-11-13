@@ -69,6 +69,7 @@ add_executable(tests
     video_core/pipeline_optimization.cpp
     video_core/spirv_atomic_retry.cpp
     video_core/spirv_geometry_passthrough.cpp
+    video_core/shader_cache_recovery.cpp
     video_core/spirv_fragment_shuffle.cpp
     video_core/ampere_depth_compare.cpp
     video_core/h264_packet.cpp

@@ -227,7 +227,7 @@ public:
     FileEnvironment& operator=(const FileEnvironment&) = delete;
     FileEnvironment(const FileEnvironment&) = delete;
 
-    void Deserialize(std::ifstream& file, bool with_mesh_state = false);
+    void Deserialize(std::ifstream& file, u64 max_bytes, bool with_mesh_state = false);
 
     [[nodiscard]] u64 ReadInstruction(u32 address) override;
 
@@ -310,8 +310,9 @@ struct CacheUpgrade {
 };
 
 /// Loads the records of a pipeline cache file. A file from min_compatible_version up to the
-/// expected version is loaded too when `upgrade` is given (its records are kept there); older or
-/// broken files are deleted.
+/// expected version is loaded too when `upgrade` is given (its records are kept there). An older
+/// file is renamed to .v<version>, a file with a bad header to .invalid, and a file whose tail is
+/// damaged is cut back to its last complete record; nothing is deleted.
 void LoadPipelines(
     std::stop_token stop_loading, const std::filesystem::path& filename, u32 expected_cache_version,
     Common::UniqueFunction<void, std::ifstream&, FileEnvironment> load_compute,
