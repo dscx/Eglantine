@@ -291,17 +291,19 @@ void TextureCache<P>::ApplyThresholdOverrides(bool log) {
     // (title 1 filled 6.7 GB of an 8 GB card and draws its races in ~5 GB), so collect from
     // MaxCriticalMemory on rather than near the card's budget. Larger cards get 5/8 of the
     // driver's budget (GetDeviceLocalMemory is capped near 7 GiB): at 5 GiB title 1's races
-    // recreate and upload ~8 MiB of render targets a frame.
-    // What the device budget allows (budget minus margins), before that cap.
+    // recreate and upload ~8 MiB of render targets a frame. Below about 6.7 GiB the caps at 3/4
+    // and 3/5 of the budget bind instead (CollectorThresholdCaps).
+    // What the device budget allows (budget minus margins), before those caps.
     const u64 budget_critical = critical_memory;
     const u64 budget_expected = expected_memory;
-    u64 max_critical = MaxCriticalMemory;
+    u64 budget = 0;
     if constexpr (requires { runtime.GetDeviceMemoryBudget(); }) {
-        max_critical = (std::max)(max_critical, runtime.GetDeviceMemoryBudget() / 8 * 5);
+        budget = runtime.GetDeviceMemoryBudget();
     }
-    critical_memory = (std::min)(critical_memory, max_critical);
-    expected_memory =
-        (std::min)(expected_memory, critical_memory - (std::min)(critical_memory, u64{768_MiB}));
+    const CollectorCaps caps = CollectorThresholdCaps(budget, MaxCriticalMemory);
+    critical_memory = (std::min)(critical_memory, caps.critical);
+    expected_memory = (std::min)({expected_memory, caps.expected,
+                                  critical_memory - (std::min)(critical_memory, u64{768_MiB})});
     minimum_memory =
         (std::min)(minimum_memory, expected_memory - (std::min)(expected_memory, u64{1_GiB}));
     // EDEN_NX2_TC_EXPECTED_MIB / EDEN_NX2_TC_CRITICAL_MIB raise the collector's thresholds past

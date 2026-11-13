@@ -65,6 +65,28 @@ using Tegra::Texture::TSCEntry;
 using VideoCore::Surface::PixelFormat;
 using namespace Common::Literals;
 
+/// The most the collector's thresholds may be, given the driver's device memory budget (0 when
+/// the runtime reports none). `floor` is what cards up to 8 GiB get regardless (MaxCriticalMemory);
+/// larger budgets allow 5/8 of themselves. Past 2 GiB, critical stays at or under 3/4 of the
+/// budget and expected at or under 3/5 of it: the driver pages textures out well before its
+/// budget is full (Mario Kart World on an 8 GB card fell from 60 to 13 fps with the collector at
+/// 7/8 of the budget and holds 60 fps at 3/4, PR 250), so on cards the floor does not reach the
+/// collector has to react earlier than a fixed margin under the budget allows.
+struct CollectorCaps {
+    u64 critical;
+    u64 expected;
+};
+
+[[nodiscard]] constexpr CollectorCaps CollectorThresholdCaps(u64 budget, u64 floor) noexcept {
+    CollectorCaps caps{floor, std::numeric_limits<u64>::max()};
+    caps.critical = (std::max)(caps.critical, budget / 8 * 5);
+    if (budget > 2_GiB) {
+        caps.critical = (std::min)(caps.critical, budget / 4 * 3);
+        caps.expected = budget / 5 * 3;
+    }
+    return caps;
+}
+
 struct ImageViewInOut {
     u32 index{};
     bool blacklist{};
@@ -154,7 +176,8 @@ class TextureCache : public VideoCommon::ChannelSetupCaches<TextureCacheChannelI
     static constexpr s64 DEFAULT_EXPECTED_MEMORY = 1_GiB + 125_MiB;
     static constexpr s64 DEFAULT_CRITICAL_MEMORY = 1_GiB + 625_MiB;
     /// The most device memory the collector lets the cache fill before it collects in earnest on
-    /// cards up to 8 GiB; larger ones 5/8 of the driver's budget (ApplyThresholdOverrides).
+    /// cards up to 8 GiB; larger ones 5/8 of the driver's budget and smaller ones 3/4 of it
+    /// (CollectorThresholdCaps, applied by ApplyThresholdOverrides).
     static constexpr u64 MaxCriticalMemory = 5_GiB;
     static constexpr size_t GC_EMERGENCY_COUNTS = 2;
     /// Switch 2 titles: images unused this long (frames) are dropped before memory gets tight.
