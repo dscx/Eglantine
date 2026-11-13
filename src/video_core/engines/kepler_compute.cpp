@@ -1442,6 +1442,15 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
              output->IsBlockLinear());
         have_pair = dlss_evaluation;
     }
+    // The compact parameter layout: a dispatch header, the image pair at 0x60/0x70 and inclusive
+    // source and destination rectangles at 0x10/0x20 (DecodeNativeUpscaleRegions below).
+    bool compact_parameters = false;
+    if (!have_pair) {
+        input = image(0x60);
+        output = image(0x70);
+        compact_parameters = upscale_pair(input, output);
+        have_pair = compact_parameters;
+    }
     bool has_program_handles = false;
     if (!have_pair) {
         // The images the program itself uses: textures it reads and the surface it stores to
@@ -1470,10 +1479,12 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
     if (!have_pair && !has_program_handles && !upscale_pair(input, output, false)) {
         input.reset();
         output.reset();
-        for (u32 first = 0x80; first < 0x120 && !input; first += 4) {
+        for (u32 first = 0x80; first < 0x120 && first + sizeof(u32) <= cbuf.size.Value() && !input;
+             first += 4) {
             const auto from = memory_manager.Read<u32>(cbuf_address + first) != 0 ? image(first)
                                                                                     : std::nullopt;
-            for (u32 second = first + 4; from && second < 0x120; second += 4) {
+            for (u32 second = first + 4;
+                 from && second < 0x120 && second + sizeof(u32) <= cbuf.size.Value(); second += 4) {
                 if (memory_manager.Read<u32>(cbuf_address + second) == 0) continue;
                 const auto to = image(second);
                 if (to && to->Width() >= 1024 && upscale_pair(from, to)) {
@@ -1551,7 +1562,7 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
         LOG_INFO(HW_GPU, "Upscale fallback for program {:#x}: {}", program,
                  known->second ? "decodes sRGB like the program" : "plain copy");
     }
-    const Fermi2D::Config config{
+    Fermi2D::Config config{
         .operation = (shared_exponent_input && output->format == Texture::TextureFormat::B10G11R11)
                          ? Fermi2D::Operation::SrcCopySquare
                      : known->second ? Fermi2D::Operation::SrcCopySrgbToLinear
@@ -1567,6 +1578,29 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
         .src_x1 = static_cast<s32>(input->Width()),
         .src_y1 = static_cast<s32>(input->Height()),
     };
+    // A compact layout can describe a 1920x1080 active output inside a 3840x2160 allocation:
+    // blit the rectangles it names instead of stretching across the whole allocation. An
+    // invalid layout keeps the full-image blit above.
+    if (compact_parameters && cbuf.size.Value() >= 0x30 &&
+        launch_description.block_dim_y == 1 && launch_description.block_dim_z == 1) {
+        std::array<u32, 12> parameters{};
+        memory_manager.ReadBlock(cbuf_address, parameters.data(), sizeof(parameters));
+        const auto regions = DecodeNativeUpscaleRegions(
+            parameters,
+            {launch_description.block_dim_x.Value(), launch_description.grid_dim_x.Value(),
+             launch_description.grid_dim_y.Value(), launch_description.grid_dim_z.Value()},
+            {input->Width(), input->Height()}, {output->Width(), output->Height()});
+        if (regions) {
+            config.src_x0 = static_cast<s32>(regions->source[0]);
+            config.src_y0 = static_cast<s32>(regions->source[1]);
+            config.src_x1 = static_cast<s32>(regions->source[2]);
+            config.src_y1 = static_cast<s32>(regions->source[3]);
+            config.dst_x0 = static_cast<s32>(regions->destination[0]);
+            config.dst_y0 = static_cast<s32>(regions->destination[1]);
+            config.dst_x1 = static_cast<s32>(regions->destination[2]);
+            config.dst_y1 = static_cast<s32>(regions->destination[3]);
+        }
+    }
     // Debug: does the input hold anything? Download it once and count non-zero words.
     static const u32 sample_at = [] {
         const char* value = std::getenv("EDEN_NX2_SAMPLE_AT");
