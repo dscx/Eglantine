@@ -64,6 +64,14 @@ enum class Zone : u32 {
     BindStorage,       ///< Of bind stage buffers: storage buffers (touch, sync, usage, bind)
     BackReplay,   ///< Split back: decoding ring entries (Execute) outside the zones it calls
     BackIdleHook, ///< Split back: the idle hook (deferred submits) outside the zones it calls
+    BindGeometry,  ///< Host vertex, index and indirect buffer binds (out of update buffers)
+    SplitCall,     ///< Split back: deferred function calls (flushes, invalidations, fences)
+    UpdateVertex,  ///< Of update buffers: resolving and tracking vertex buffers
+    UpdateUniform, ///< Of update buffers: resolving and tracking uniform buffers
+    CacheLockWait, ///< Waiting for the buffer and texture cache mutexes before a draw
+    DmaFetch,      ///< Of push: reading an entry's words from guest memory
+    DmaDispatch,   ///< Of push: decoding the words and calling the engines' methods
+    ChannelSwitch, ///< Of push: binding the channel and resuming suspended channels
     Count,
 };
 
@@ -78,6 +86,8 @@ inline constexpr std::array<const char*, static_cast<size_t>(Zone::Count)> zone_
     "list copy wait",
     "bind uniform bank", "bind uniform stream", "bind uniform cached", "bind storage",
     "back replay", "back idle hook",
+    "bind geometry buffers", "split call", "update vertex buffers", "update uniform buffers",
+    "cache lock wait", "dma fetch", "dma dispatch", "channel switch",
 };
 
 // Read once at startup: Enabled() runs several times per method write (no guard to check).
@@ -223,6 +233,8 @@ enum class Counter : u32 {
     PendingWakePush,
     PendingWakeLatch,
     PendingWakeTimeout,
+    SkippedDraws,   ///< Draws dropped because a bound native program was rejected
+    PipelineMisses, ///< Graphics and compute pipeline cache misses (a build made or deferred)
     Count,
 };
 
@@ -381,6 +393,8 @@ inline void Report(const char* thread_name = "GPU thread") {
     };
     line += fmt::format(" | acquire polls {:.0f} ({:.0f} met)", per_second(Counter::AcquirePolls),
                         per_second(Counter::AcquirePollsMet));
+    line += fmt::format(" | draws skipped (rejected program) {:.0f} | pipeline cache misses {:.0f}",
+                        per_second(Counter::SkippedDraws), per_second(Counter::PipelineMisses));
     if (data.counters[static_cast<size_t>(Counter::PendingWaits)] != 0) {
         line += fmt::format(" | pending_wake sleeps {:.0f} (ended by push {:.0f}, latch {:.0f}, "
                             "timeout {:.0f})",

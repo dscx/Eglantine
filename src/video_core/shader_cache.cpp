@@ -176,6 +176,7 @@ bool ShaderCache::RefreshStages(std::array<u64, 6>& unique_hashes) try {
         if (!shader_info && !cpu_shader_addr) {
             LOG_ERROR(HW_GPU, "Invalid GPU address for shader {:#016x}", shader_addr);
             last_shaders_valid = false;
+            last_shaders_rejected = false;
             return false;
         }
         if (!shader_info && native && IsRejected(*cpu_shader_addr)) {
@@ -183,6 +184,7 @@ bool ShaderCache::RefreshStages(std::array<u64, 6>& unique_hashes) try {
             // without rethrowing (two C++ throws each time cost ~1-2% of the GPU thread).
             maxwell3d->GetNativeMacroEngine().native_execution_failed = true;
             last_shaders_valid = false;
+            last_shaders_rejected = true;
             return false;
         }
         if (!shader_info) {
@@ -226,6 +228,7 @@ bool ShaderCache::RefreshStages(std::array<u64, 6>& unique_hashes) try {
         }
     }
     last_shaders_valid = true;
+    last_shaders_rejected = false;
     if (VideoCommon::Nx2Perf::On(VideoCommon::Nx2Perf::Opt::MacroReadWriterSet) &&
         code_ranges_known) {
         nx2_resolved_epoch = code_epoch;
@@ -237,6 +240,7 @@ bool ShaderCache::RefreshStages(std::array<u64, 6>& unique_hashes) try {
     if (!native.native_turing) throw;
     native.native_execution_failed = true;
     last_shaders_valid = false;
+    last_shaders_rejected = true;
     // Each rejected program is logged once (the draws that use it keep failing quietly).
     static std::unordered_set<std::string> logged;
     if (logged.insert(error.what()).second) {

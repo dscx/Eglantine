@@ -81,6 +81,11 @@ public:
     /// @brief Flushes delayed removal operations
     void SyncGuestHost();
 
+    /// True when the current shaders are invalid because a native program was rejected.
+    [[nodiscard]] bool LastShadersRejected() const noexcept {
+        return last_shaders_rejected;
+    }
+
     /// Drops the cached native programs the debug server rejects (docs/nx2/debug-mcp.md); after
     /// an un-reject also every remembered rejection. Rasterizer thread, between frames.
     void RefreshDebugRejections(bool unrejected);
@@ -120,6 +125,10 @@ protected:
 
     std::array<const ShaderInfo*, NUM_PROGRAMS> shader_infos{};
     bool last_shaders_valid = false;
+    /// The current shaders were refused because a native program was rejected. Unlike
+    /// !last_shaders_valid, it stays false for other failures such as an invalid shader GPU
+    /// address. The rasterizer counts the skipped draws from it (LastShadersRejected).
+    bool last_shaders_rejected = false;
     /// Nx2Perf MacroReadWriterSet: Tegra::g_nx2_code_epoch read before shader_infos were last
     /// resolved (0: they are not valid), and the device code range of each program (size 0: none).
     u64 nx2_resolved_epoch{};

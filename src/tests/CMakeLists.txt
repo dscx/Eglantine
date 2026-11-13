@@ -72,6 +72,7 @@ add_executable(tests
     video_core/shader_cache_recovery.cpp
     video_core/null_descriptor_log.cpp
     video_core/collector_thresholds.cpp
+    video_core/nx2_profile_names.cpp
     video_core/spirv_fragment_shuffle.cpp
     video_core/ampere_depth_compare.cpp
     video_core/h264_packet.cpp
