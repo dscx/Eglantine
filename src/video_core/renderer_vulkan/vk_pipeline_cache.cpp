@@ -51,6 +51,7 @@
 #include "video_core/renderer_vulkan/maxwell_to_vk.h"
 #include "video_core/renderer_vulkan/pipeline_cache_dir.h"
 #include "video_core/renderer_vulkan/pipeline_helper.h"
+#include "video_core/renderer_vulkan/spirv_blocks.h"
 #include "video_core/renderer_vulkan/pipeline_statistics.h"
 #include "video_core/renderer_vulkan/vertex_repack.h"
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
@@ -813,6 +814,31 @@ bool BackgroundPipelinesEnabled() {
         return value == nullptr || value[0] != '0';
     }();
     return enabled;
+}
+
+/// MoltenVK: a stage with more basic blocks than SPIRV-Cross's recursive analysis can take on a
+/// thread's stack is refused (spirv_blocks.h), once per program in the log.
+bool RefusedForMoltenVkBlocks(const Device& device, std::span<const u32> code, u64 hash,
+                              const char* stage) {
+    if (!device.IsMoltenVK()) {
+        return false;
+    }
+    const size_t budget = MoltenVkBlockBudget();
+    const size_t blocks = CountSpirvBlocks(code);
+    if (budget == 0 || blocks <= budget) {
+        return false;
+    }
+    static std::mutex mutex;
+    static std::unordered_set<u64> logged;
+    std::scoped_lock lock{mutex};
+    if (logged.insert(hash).second) {
+        LOG_WARNING(Render_Vulkan,
+                    "{} program {:016x} has {} basic blocks ({} SPIR-V words), more than the {} "
+                    "MoltenVK's SPIR-V conversion can take on a thread's stack: its pipeline is "
+                    "not built (EDEN_NX2_MVK_MAX_BLOCKS)",
+                    stage, hash, blocks, code.size(), budget);
+    }
+    return true;
 }
 
 size_t BackgroundPipelineThreads() {
@@ -3008,6 +3034,9 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
                 }
             }
         }
+        if (RefusedForMoltenVkBlocks(device, code, key.unique_hashes[index], "Graphics")) {
+            return nullptr;
+        }
         device.SaveShader(code);
         emit_timer.reset();
         {
@@ -3584,6 +3613,26 @@ ComputePipelineCacheEntry PipelineCache::CreateComputePipeline(ShaderPools& pool
     }
     const std::vector<u32> code{EmitSPIRV(profile, program)};
     device.SaveShader(code);
+    if (RefusedForMoltenVkBlocks(device, code, key.unique_hash, "Compute")) {
+        return {};
+    }
+    // EDEN_NX2_PIPE_TRACE=1: as for graphics pipelines, name the program before and after the
+    // driver builds it, so a build that never returns (or kills the process, as a stack overflow
+    // in MoltenVK's SPIR-V conversion did) is the start line without a done line.
+    static const bool pipe_trace = std::getenv("EDEN_NX2_PIPE_TRACE") != nullptr;
+    const auto trace_begin = std::chrono::steady_clock::now();
+    if (pipe_trace) {
+        LOG_INFO(Render_Vulkan, "PIPE start compute {:016x} ({} SPIR-V words)", key.unique_hash,
+                 code.size());
+    }
+    SCOPE_EXIT {
+        if (pipe_trace) {
+            LOG_INFO(Render_Vulkan, "PIPE done compute {:016x} ms={:.1f}", key.unique_hash,
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                               trace_begin)
+                         .count());
+        }
+    };
     vk::ShaderModule spv_module{BuildShader(device, code)};
 
     // Text log + .spv dump. Same split as the graphics path.
