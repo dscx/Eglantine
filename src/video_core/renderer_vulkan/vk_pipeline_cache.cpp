@@ -2173,6 +2173,16 @@ void PipelineCache::StopBackgroundPipelines() {
 
 void PipelineCache::StartShaderPrecache(u64 title_id) {
     namespace ShaderWarm = VideoCommon::ShaderWarm;
+    // MoltenVK: compiling every compute program in the game's archives sends some of them
+    // through SPIRV-Cross's recursive control-flow analysis deeper than a worker thread's stack
+    // allows (Ocarina of Time: EXC_BAD_ACCESS in analyze_variable_scope on a VkShaderPrecache
+    // thread four seconds into the boot). Until the workers get larger stacks the precache stays
+    // off there; EDEN_NX2_PRECACHE_ON_MOLTENVK=1 runs it anyway.
+    if (device.IsMoltenVK() && std::getenv("EDEN_NX2_PRECACHE_ON_MOLTENVK") == nullptr) {
+        LOG_INFO(Render_Vulkan, "Shader precache: skipped on MoltenVK (a worker's stack overflows in "
+                                "SPIRV-Cross); EDEN_NX2_PRECACHE_ON_MOLTENVK=1 runs it");
+        return;
+    }
     const std::filesystem::path warm_file = ShaderWarm::ComputeWarmPath(title_id);
     std::error_code ec;
     if (!std::filesystem::exists(warm_file, ec)) {
