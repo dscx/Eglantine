@@ -146,7 +146,23 @@ static Shader::TextureType ConvertTextureType(const Tegra::Texture::TICEntry& en
     }
 }
 
-static Shader::TexturePixelFormat ConvertTexturePixelFormat(const Tegra::Texture::TICEntry& entry) {
+static Shader::TexturePixelFormat ConvertTexturePixelFormat(const Tegra::Texture::TICEntry& entry,
+                                                            u32 handle) {
+    // Format 0 is a null descriptor: PixelFormatFromTextureInfo returns Invalid and the texture
+    // cache binds the null view. Each distinct one is logged once. The zeroed placeholder titles
+    // leave in unused slots is routine; anything else is a texture whose format is unknown.
+    static Tegra::Texture::NullDescriptorLog null_descriptors;
+    if (static_cast<u32>(entry.format.Value()) == 0 && null_descriptors.Note(entry)) {
+        if (Tegra::Texture::IsPlaceholderDescriptor(entry)) {
+            LOG_DEBUG(Shader, "Texture handle {:#x} reads a null descriptor ({})", handle,
+                      Tegra::Texture::DescribeDescriptor(entry));
+        } else {
+            LOG_WARNING(Shader,
+                        "Texture handle {:#x} reads a format-0 descriptor that is not the zeroed "
+                        "placeholder; it samples as the null view ({})",
+                        handle, Tegra::Texture::DescribeDescriptor(entry));
+        }
+    }
     return static_cast<Shader::TexturePixelFormat>(
         PixelFormatFromTextureInfo(entry.format, entry.r_type, entry.g_type, entry.b_type,
                                    entry.a_type, entry.srgb_conversion));
@@ -910,7 +926,7 @@ Shader::TexturePixelFormat GraphicsEnvironment::ReadTexturePixelFormat(u32 handl
     const bool via_header_index{regs.sampler_binding == Maxwell::SamplerBinding::ViaHeaderBinding};
     auto entry =
         ReadTextureInfo(regs.tex_header.Address(), regs.tex_header.limit, via_header_index, handle);
-    const Shader::TexturePixelFormat result(ConvertTexturePixelFormat(entry));
+    const Shader::TexturePixelFormat result(ConvertTexturePixelFormat(entry, handle));
     texture_pixel_formats.emplace(handle, result);
     return result;
 }
@@ -974,7 +990,7 @@ Shader::TexturePixelFormat ComputeEnvironment::ReadTexturePixelFormat(u32 handle
     const auto& regs{kepler_compute->regs};
     const auto& qmd{kepler_compute->launch_description};
     auto entry = ReadTextureInfo(regs.tic.Address(), regs.tic.limit, qmd.linked_tsc != 0, handle);
-    const Shader::TexturePixelFormat result(ConvertTexturePixelFormat(entry));
+    const Shader::TexturePixelFormat result(ConvertTexturePixelFormat(entry, handle));
     texture_pixel_formats.emplace(handle, result);
     return result;
 }

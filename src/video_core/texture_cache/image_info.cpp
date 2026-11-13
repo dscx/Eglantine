@@ -40,6 +40,23 @@ ImageInfo::ImageInfo(const TICEntry& config) noexcept {
     dma_downloaded = forced_flushed;
     format = PixelFormatFromTextureInfo(config.format, config.r_type, config.g_type, config.b_type,
                                         config.a_type, config.srgb_conversion);
+    if (static_cast<u32>(config.format.Value()) == 0) {
+        // A null descriptor (format 0): the format is Invalid and the texture cache binds the null
+        // view. Each distinct one is logged once; the zeroed placeholder titles leave in unused
+        // slots is routine, anything else is a texture whose format is unknown.
+        static Tegra::Texture::NullDescriptorLog null_descriptors;
+        if (null_descriptors.Note(config)) {
+            if (Tegra::Texture::IsPlaceholderDescriptor(config)) {
+                LOG_DEBUG(HW_GPU, "Null texture descriptor bound ({})",
+                          Tegra::Texture::DescribeDescriptor(config));
+            } else {
+                LOG_WARNING(HW_GPU,
+                            "Format-0 texture descriptor that is not the zeroed placeholder is "
+                            "drawn as the null view ({})",
+                            Tegra::Texture::DescribeDescriptor(config));
+            }
+        }
+    }
     num_samples = NumSamples(config.msaa_mode);
     resources.levels = config.max_mip_level + 1;
     if (config.IsPitchLinear()) {

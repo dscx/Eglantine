@@ -7,6 +7,9 @@
 #pragma once
 
 #include <array>
+#include <mutex>
+#include <set>
+#include <string>
 #include "common/assert.h"
 #include "common/bit_field.h"
 #include "common/common_types.h"
@@ -297,6 +300,28 @@ struct TICEntry {
     }
 };
 static_assert(sizeof(TICEntry) == 0x20, "TICEntry has wrong size");
+
+/// A TIC with format 0 is a null descriptor: the texture cache binds the null view for it. This
+/// tells the zeroed placeholder titles leave in unused slots (address 0, 1x1x1) from a format-0
+/// descriptor that describes a real texture, whose format is then unknown.
+[[nodiscard]] bool IsPlaceholderDescriptor(const TICEntry& entry) noexcept;
+
+/// The descriptor's raw words and the fields that identify it, for a log line.
+[[nodiscard]] std::string DescribeDescriptor(const TICEntry& entry);
+
+/// Remembers the distinct format-0 descriptors a site has seen, so each is logged once. At most
+/// MaxEntries are kept; a new descriptor past that is not reported.
+class NullDescriptorLog {
+public:
+    static constexpr size_t MaxEntries = 64;
+
+    /// True the first time these raw words are seen, while there is room to remember them.
+    [[nodiscard]] bool Note(const TICEntry& entry);
+
+private:
+    std::mutex mutex;
+    std::set<std::array<u64, 4>> seen;
+};
 
 enum class WrapMode : u32 {
     Wrap = 0,

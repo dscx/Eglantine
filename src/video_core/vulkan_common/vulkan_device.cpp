@@ -1723,6 +1723,13 @@ void Device::RemoveUnsuitableExtensions() {
                     "enables it");
         extensions.mesh_shader = false;
     }
+    // Whether this device takes the mesh path is answerable from the log alone.
+    LOG_INFO(Render_Vulkan,
+             "VK_EXT_mesh_shader: extension {}, taskShader={} meshShader={}, enabled={}",
+             loaded_extensions.contains(VK_EXT_MESH_SHADER_EXTENSION_NAME) ? "loaded"
+                                                                            : "not loaded",
+             features.mesh_shader.taskShader != VK_FALSE,
+             features.mesh_shader.meshShader != VK_FALSE, extensions.mesh_shader);
     RemoveExtensionFeatureIfUnsuitable(extensions.mesh_shader, features.mesh_shader,
                                        VK_EXT_MESH_SHADER_EXTENSION_NAME);
 

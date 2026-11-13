@@ -6,6 +6,9 @@
 
 #include <array>
 #include <cmath>
+#include <mutex>
+
+#include <fmt/format.h>
 
 #include "common/cityhash.h"
 #include "common/settings.h"
@@ -27,6 +30,27 @@ float SrgbToLinear(u32 value) {
 }
 
 } // Anonymous namespace
+
+bool IsPlaceholderDescriptor(const TICEntry& entry) noexcept {
+    return entry.Address() == 0 && entry.Width() == 1 && entry.Height() == 1 && entry.Depth() == 1;
+}
+
+std::string DescribeDescriptor(const TICEntry& entry) {
+    return fmt::format("raw {:016x} {:016x} {:016x} {:016x} addr {:#x} {}x{}x{} type {} header {}",
+                       entry.raw[0], entry.raw[1], entry.raw[2], entry.raw[3], entry.Address(),
+                       entry.Width(), entry.Height(), entry.Depth(),
+                       static_cast<u32>(entry.texture_type.Value()),
+                       static_cast<u32>(entry.header_version.Value()));
+}
+
+bool NullDescriptorLog::Note(const TICEntry& entry) {
+    std::scoped_lock lock{mutex};
+    if (seen.contains(entry.raw) || seen.size() >= MaxEntries) {
+        return false;
+    }
+    seen.insert(entry.raw);
+    return true;
+}
 
 std::array<float, 4> TSCEntry::BorderColor() const noexcept {
     return border_color;
