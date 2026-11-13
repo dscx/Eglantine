@@ -710,8 +710,11 @@ private:
     std::deque<PendingUnswizzle> unswizzle_queue;
     u8 current_unswizzle_frame;
 
-    /// Copies of colour targets their own draws sample, one per image shape (never deleted).
-    std::vector<ImageId> feedback_shadows;
+    struct FeedbackShadow {
+        ImageId id;
+        u64 last_frame;
+    };
+    std::vector<FeedbackShadow> feedback_shadows;
 
     // Join caching
     boost::container::small_vector<ImageId, 4> join_overlap_ids;

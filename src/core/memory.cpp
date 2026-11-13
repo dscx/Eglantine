@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <atomic>
+#include <chrono>
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -30,6 +31,8 @@
 #include "core/core.h"
 #include "core/device_memory.h"
 #include "core/gpu_dirty_memory_manager.h"
+#include "video_core/nx2_hazard.h"
+#include "video_core/nx2_spikes.h"
 #include "core/hardware_properties.h"
 #include "core/hle/kernel/k_page_table.h"
 #include "core/hle/kernel/k_process.h"
@@ -546,7 +549,51 @@ struct Memory::Impl {
                 perm |= Common::MemoryPermission::Write;
             }
             if (current_page_table->fastmem_arena) {
+                // EDEN_NX2_PROTECT_STATS=1: how many protection changes the tracker makes, and what
+                // they cost, per 5 s (diagnostic).
+                static const bool stats_enabled = std::getenv("EDEN_NX2_PROTECT_STATS") != nullptr;
+                const bool spikes = VideoCommon::Nx2Spikes::Counting();
+                const auto stats_start = stats_enabled || spikes
+                                             ? std::chrono::steady_clock::now()
+                                             : std::chrono::steady_clock::time_point{};
                 host_buffer->Protect(vaddr, size, perm);
+                if (spikes) {
+                    VideoCommon::Nx2Spikes::Note(VideoCommon::Nx2Spikes::Event::ProtectChange,
+                                                 std::chrono::steady_clock::now() - stats_start,
+                                                 size >> YUZU_PAGEBITS);
+                }
+                if (stats_enabled) [[unlikely]] {
+                    static std::atomic<u64> calls[2]{}, pages[2]{}, nanos[2]{};
+                    static std::atomic<u64> window_start{0};
+                    const auto now = std::chrono::steady_clock::now();
+                    const u64 now_ns = static_cast<u64>(
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch())
+                            .count());
+                    const int side = cached ? 1 : 0;
+                    calls[side].fetch_add(1, std::memory_order_relaxed);
+                    pages[side].fetch_add(size >> YUZU_PAGEBITS, std::memory_order_relaxed);
+                    nanos[side].fetch_add(
+                        static_cast<u64>(
+                            std::chrono::duration_cast<std::chrono::nanoseconds>(now - stats_start)
+                                .count()),
+                        std::memory_order_relaxed);
+                    u64 started = window_start.load(std::memory_order_relaxed);
+                    if (started == 0) {
+                        window_start.compare_exchange_strong(started, now_ns);
+                    } else if (now_ns - started > 5'000'000'000ULL &&
+                               window_start.compare_exchange_strong(started, now_ns)) {
+                        const double seconds = static_cast<double>(now_ns - started) / 1e9;
+                        LOG_INFO(HW_Memory,
+                                 "nx2 protect: to read-only (tracked) {:.0f}/s ({:.0f} pages/s, {:.0f} "
+                                 "ms/s), to writable (untracked) {:.0f}/s ({:.0f} pages/s, {:.0f} ms/s)",
+                                 static_cast<double>(calls[1].exchange(0)) / seconds,
+                                 static_cast<double>(pages[1].exchange(0)) / seconds,
+                                 static_cast<double>(nanos[1].exchange(0)) / 1e6 / seconds,
+                                 static_cast<double>(calls[0].exchange(0)) / seconds,
+                                 static_cast<double>(pages[0].exchange(0)) / seconds,
+                                 static_cast<double>(nanos[0].exchange(0)) / 1e6 / seconds);
+                    }
+                }
                 if (cached && perm != Common::MemoryPermission{}) {
                     ProtectArmedPages(vaddr, size);
                 }
@@ -711,6 +758,7 @@ struct Memory::Impl {
                                  Common::MemoryPermission::Read);
             it = armed_read_traps.erase(it);
             armed_read_trap_count.fetch_sub(1, std::memory_order_relaxed);
+            VideoCommon::Nx2Spikes::Note(VideoCommon::Nx2Spikes::Event::ReadTrapHit);
         }
     }
 
@@ -959,6 +1007,7 @@ struct Memory::Impl {
     }
 
     void HandleRasterizerWrite(VAddr v_address, size_t size) {
+        VideoCommon::Nx2Spikes::Note(VideoCommon::Nx2Spikes::Event::CpuWriteSlowPath, {}, size);
         const auto* p = GetPointerImpl(
             v_address, []() {}, []() {});
         constexpr size_t sys_core = Core::Hardware::NUM_CPU_CORES - 1;
@@ -993,6 +1042,7 @@ struct Memory::Impl {
                     return;
                 }
             }
+            VideoCommon::Nx2Hazard::NoteGuestWrite(address, size);
             gpu_dirty_managers[core].Collect(address, size);
         });
     }

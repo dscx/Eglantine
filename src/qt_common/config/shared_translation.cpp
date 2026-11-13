@@ -299,10 +299,31 @@ std::unique_ptr<TranslationMap> InitializeTranslations(QObject* parent) {
               "Increasing this can improve throughput on high-end GPUs but may cause TDR or driver "
               "timeouts on weaker hardware."));
 
+    INSERT(Settings, use_mesh_shaders, tr("Use mesh shaders"),
+           tr("Draws the task and mesh shader geometry of Switch 2 games with the GPU's own mesh "
+              "shaders (VK_EXT_mesh_shader).\nTurn it off to use the slower compute fallback, "
+              "for example if a driver draws that geometry wrong or crashes.\n"
+              "Takes effect when a game starts."));
     INSERT(Settings, use_vulkan_driver_pipeline_cache, tr("Use Vulkan pipeline cache"),
            tr("Enables GPU vendor-specific pipeline cache.\nThis option can improve shader loading "
               "time significantly in cases where the Vulkan driver does not store pipeline cache "
               "files internally."));
+    INSERT(Settings, private_driver_shader_cache, QString(), QString());
+    INSERT(Settings, cold_hint_mode, tr("Release uploaded guest memory"),
+           tr("Hands the guest memory of textures and buffers already on the GPU back to the "
+              "operating system (Mario Kart World: about 1.2 GB).\n"
+              "When RAM is low: only marks it to be reclaimed first, and "
+              "pages it out only while the system is short of memory.\n"
+              "Always: pages it out every few seconds, which stalls rendering for tens to "
+              "hundreds of milliseconds each time."));
+#if defined(__linux__)
+    INSERT(Settings, driver_shader_cache_size, tr("Separate driver shader cache (Linux only)"),
+           tr("Keeps the NVIDIA driver's shader cache for this emulator in its own folder, up to "
+              "this size, so other applications can't evict it.\nTurn it off to use the "
+              "driver's shared cache instead.\nTakes effect at the next start."));
+#else
+    INSERT(Settings, driver_shader_cache_size, QString(), QString());
+#endif
     INSERT(Settings, enable_compute_pipelines, tr("Enable Compute Pipelines (Intel Vulkan Only)"),
            tr("Required by some games.\nThis setting only exists for Intel "
               "proprietary drivers and may crash if enabled.\nCompute pipelines are always enabled "
@@ -321,6 +342,14 @@ std::unique_ptr<TranslationMap> InitializeTranslations(QObject* parent) {
            tr("Lets the game adjust between 30 and 60 FPS using whole-frame timing to maintain "
               "normal game speed. Takes effect after restarting the game and takes precedence over "
               "the 30 FPS mode."));
+    INSERT(Settings, hyrule_dynamic_fps,
+           tr("Hyrule Warriors: Age of Imprisonment: dynamic FPS (experimental)"),
+           tr("Drops to 30 FPS with the game's split-screen time step while the game runs below "
+              "about 50 FPS, so heavy slowdowns don't slow down the game, and tries 60 FPS again "
+              "every few seconds."));
+    INSERT(Settings, hyrule_30fps, tr("Hyrule Warriors: Age of Imprisonment: 30 FPS mode"),
+           tr("Always runs at 30 FPS with the game's split-screen time step, at normal game speed. "
+              "Takes precedence over dynamic FPS."));
     INSERT(Settings, barrier_feedback_loops, tr("Barrier feedback loops"),
            tr("Improves rendering of transparency effects in specific games."));
     INSERT(Settings, enable_buffer_history, tr("Enable buffer history"),
@@ -459,6 +488,12 @@ std::unique_ptr<ComboboxTranslationMap> ComboboxEnumeration(QObject* parent) {
                               PAIR(FramePacingMode, Target_60, tr("60 FPS")),
                               PAIR(FramePacingMode, Target_90, tr("90 FPS")),
                               PAIR(FramePacingMode, Target_120, tr("120 FPS")),
+                          }});
+    translations->insert({Settings::EnumMetadata<Settings::ColdHintMode>::Index(),
+                          {
+                              PAIR(ColdHintMode, Off, tr("Off")),
+                              PAIR(ColdHintMode, WhenRamIsLow, tr("When RAM is low")),
+                              PAIR(ColdHintMode, Always, tr("Always")),
                           }});
     translations->insert({Settings::EnumMetadata<Settings::VramUsageMode>::Index(),
                           {

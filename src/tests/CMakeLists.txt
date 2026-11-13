@@ -5,6 +5,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 add_executable(tests
+    core/nx2_frame_interval.cpp
+    video_core/upload_batch.cpp
     core/nx2_oot_time.cpp
     video_core/unbacked_image_policy.cpp
     core/builtin_patches.cpp
@@ -76,6 +78,9 @@ add_executable(tests
     video_core/native_upscale.cpp
     video_core/spirv_fragment_shuffle.cpp
     video_core/ampere_depth_compare.cpp
+    video_core/shader_bench.cpp
+    video_core/shader_precache.cpp
+    video_core/shader_precache_identity.cpp
     video_core/h264_packet.cpp
     video_core/vertex_repack.cpp
     video_core/virtual_range_cache.cpp
@@ -118,12 +123,17 @@ add_executable(tests
 create_target_directory_groups(tests)
 
 target_link_libraries(tests PRIVATE common core input_common video_core)
+
+if (ENABLE_MCP_SERVER)
+    target_sources(tests PRIVATE mcp/protocol.cpp)
+    target_link_libraries(tests PRIVATE mcp)
+endif()
 target_link_libraries(tests PRIVATE ${PLATFORM_LIBRARIES} Catch2::Catch2WithMain Threads::Threads)
 
 add_test(NAME tests COMMAND tests)
 
 # needed for vma
-if (NOT MSVC)
+if(NOT MSVC)
     target_compile_options(tests PRIVATE
         $<$<COMPILE_LANGUAGE:C,CXX>:-Wno-conversion>
         $<$<COMPILE_LANGUAGE:C,CXX>:-Wno-unused-variable>

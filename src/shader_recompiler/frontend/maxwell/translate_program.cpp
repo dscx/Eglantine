@@ -390,6 +390,12 @@ IR::Program TranslateProgram(ObjectPool<IR::Inst>& inst_pool, ObjectPool<IR::Blo
                 program.info.passthrough.mask[i] = ((mask[i / 32] >> (i % 32)) & 1) == 0;
             }
 
+            // Vertex draw parameters and fragment built-ins cannot be geometry inputs.
+            for (const IR::Attribute attr : {IR::Attribute::InstanceId, IR::Attribute::VertexId,
+                                             IR::Attribute::BaseInstance, IR::Attribute::BaseVertex,
+                                             IR::Attribute::DrawID, IR::Attribute::FrontFace}) {
+                program.info.passthrough.mask[static_cast<size_t>(attr)] = false;
+            }
             if (!normalized_host_info.support_geometry_shader_passthrough) {
                 // The lowered shader copies only Position and the generics; the mask's other
                 // bits (InstanceId, VertexId, FrontFace...) would declare stage inputs a geometry
