@@ -168,20 +168,33 @@ void ServiceFrameworkBase::ReportUnimplementedFunction(HLERequestContext& ctx,
 
     fmt::memory_buffer buf;
     fmt::format_to(std::back_inserter(buf), "function '{}({})': port='{}' cmd_buf={{[0]={:#x}", ctx.GetCommand(), function_name, service_name, cmd_buf[0]);
-    // The Switch 2 video decoder sessions are being reverse engineered: dump whole requests.
-    const int last_word = std::string_view{service_name}.starts_with("nx2:vdec") ? 47 : 8;
+    // The Switch 2 video decoder and camera sessions are being reverse engineered: dump whole
+    // requests, and the guest PC that issued a camera request.
+    const bool is_camera = std::string_view{service_name}.starts_with("nx2:camera");
+    const int last_word = std::string_view{service_name}.starts_with("nx2:vdec") ? 47
+                          : is_camera                                              ? 23
+                                                                                   : 8;
     for (int i = 1; i <= last_word; ++i)
         fmt::format_to(std::back_inserter(buf), ", [{}]={:#x}", i, cmd_buf[i]);
+    if (is_camera) {
+        const auto& thread_ctx = ctx.GetThread().GetContext();
+        fmt::format_to(std::back_inserter(buf), ", pc={:#x}, lr={:#x}", thread_ctx.pc,
+                       thread_ctx.lr);
+    }
     buf.push_back('}');
 
     system.GetReporter().SaveUnimplementedFunctionReport(ctx, ctx.GetCommand(), function_name, service_name);
-    UNIMPLEMENTED_MSG("Unknown / unimplemented {}", fmt::to_string(buf));
-    if (auto_stub) {
-        LOG_WARNING(Service, "Using auto stub fallback (repeats of this command are not logged)");
-        IPC::ResponseBuilder rb{ctx, 2 + StubZeroedWords};
-        rb.Push(ResultSuccess);
-        PushStubZeroes(rb);
+    if (!auto_stub) {
+        UNIMPLEMENTED_MSG("Unknown / unimplemented {}", fmt::to_string(buf));
+        return;
     }
+    // An auto-stubbed call must not reach UNIMPLEMENTED_MSG: with debug asserts on it would stop
+    // the emulator before the fallback response is written.
+    LOG_WARNING(Service, "Using auto stub fallback for {} (repeats of this command are not logged)",
+                fmt::to_string(buf));
+    IPC::ResponseBuilder rb{ctx, 2 + StubZeroedWords};
+    rb.Push(ResultSuccess);
+    PushStubZeroes(rb);
 }
 
 void ServiceFrameworkBase::InvokeRequest(HLERequestContext& ctx) {
