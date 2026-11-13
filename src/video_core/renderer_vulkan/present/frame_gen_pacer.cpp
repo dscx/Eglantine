@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <utility>
 
 #include "common/settings.h"
@@ -26,7 +27,9 @@ constexpr f32 UNLOADED_BASE_RETENTION = 0.75f;
 constexpr f32 CREDIT_EPSILON = 1.0e-4f;
 constexpr u32 MAX_PROBE_FAILURES = 4;
 
-constexpr auto STABILIZATION_DURATION = std::chrono::seconds(1);
+// Resume generating on the first frame after a hitch. A one-second pause after every hitch
+// (shader builds) lost ~2-4 fps of output at a 60 fps target.
+constexpr auto STABILIZATION_DURATION = std::chrono::milliseconds(0);
 constexpr auto PROBE_DURATION = std::chrono::seconds(1);
 constexpr auto DEFICIT_DURATION = std::chrono::seconds(1);
 constexpr auto PROBE_STEP_DELAY = std::chrono::milliseconds(250);
@@ -142,6 +145,21 @@ FrameGenPlan FrameGenPacer::Plan(size_t capacity) {
 
 void FrameGenPacer::UpdateLimit(Clock::time_point now, f32 base_rate, f32 target_rate,
                                 size_t ceiling) {
+    // No probing by default. The probe read the game's own frame-rate swings (Mario Kart World:
+    // 20-35 fps from scene to scene) as frame generation slowing emulation and backed off for up
+    // to a minute, so a 60 fps target stayed at one generated frame per real frame. Allow the
+    // ceiling and let the output credit in Plan() issue only the frames the target needs (none
+    // when the game already runs at the target). EDEN_NX2_FG_PROBE=1 restores the probing.
+    static const bool probe = [] {
+        const char* value = std::getenv("EDEN_NX2_FG_PROBE");
+        return value != nullptr && value[0] == '1';
+    }();
+    if (!probe) {
+        limit = ceiling;
+        probe_until.reset();
+        deficit_since.reset();
+        return;
+    }
     limit = std::min(limit, ceiling);
 
     if (probe_until) {
