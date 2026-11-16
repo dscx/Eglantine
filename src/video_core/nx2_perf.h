@@ -101,6 +101,10 @@ enum class Opt : unsigned {
     /// A submission whose upload command buffer recorded nothing submits the main one alone
     /// (on MoltenVK the empty one still became a Metal command buffer, ~0.2 ms each)
     UploadSkip,
+    /// A submission with nothing recorded since the last one is skipped: a fence queued then
+    /// waits for the last submitted tick, and FlushCommands after a fence's own flush returns
+    /// (about half of the submissions in an OoT 3D scene on MoltenVK carried no command)
+    SkipEmptySubmit,
     Count,
 };
 
@@ -115,6 +119,7 @@ inline constexpr std::array<std::string_view, static_cast<size_t>(Opt::Count)> o
     "handle_page_cache", "dma_forward", "draw_begin_coalesce", "pending_wake", "diag_draw_lite",
     "shader_build_budget", "compute_rebuild_async", "compute_preload_variants", "stale_target_skip",
     "geometry_consistency", "build_order_priority", "replay_disk_recordings", "upload_skip",
+    "skip_empty_submit",
 };
 
 static_assert(static_cast<size_t>(Opt::Count) <= 64, "the off-mask is 64 bits");

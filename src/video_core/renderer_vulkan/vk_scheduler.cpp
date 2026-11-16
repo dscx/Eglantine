@@ -10,6 +10,8 @@
 #include <memory>
 #include <mutex>
 #include <span>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -428,6 +430,35 @@ void Scheduler::WorkerThread(std::stop_token stop_token) {
     }
 }
 
+void Scheduler::ReportRecordSites() {
+    const auto name = [](const std::pair<const char*, u32>& site) {
+        std::string_view file{site.first};
+        if (const size_t slash = file.rfind('/'); slash != std::string_view::npos) {
+            file.remove_prefix(slash + 1);
+        }
+        return fmt::format("{}:{}", file, site.second);
+    };
+    std::string signature;
+    const size_t total = record_sites.size() + record_sites_overflow;
+    if (total > MAX_RECORD_SITES) {
+        signature = fmt::format("{}+ commands, first {}", MAX_RECORD_SITES,
+                                record_sites.empty() ? std::string{"-"} : name(record_sites[0]));
+    } else {
+        for (const auto& site : record_sites) {
+            const std::string text = name(site);
+            if (signature.find(text) == std::string::npos) {
+                signature += signature.empty() ? text : "," + text;
+            }
+        }
+        if (signature.empty()) {
+            signature = "no commands";
+        }
+    }
+    VideoCommon::Nx2Profile::AddSubmitSites(signature);
+    record_sites.clear();
+    record_sites_overflow = 0;
+}
+
 void Scheduler::AllocateWorkerCommandBuffer() {
     current_cmdbuf = vk::CommandBuffer(command_pool->Commit(), device.GetDispatchLoader());
     current_cmdbuf.Begin({
@@ -458,6 +489,10 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
     // submission. The submit command below is recorded through RecordImpl so it does not count.
     const bool submit_upload = std::exchange(upload_cmdbuf_recorded, false) ||
                                !VideoCommon::Nx2Perf::On(VideoCommon::Nx2Perf::Opt::UploadSkip);
+    work_recorded = false;
+    if (VideoCommon::Nx2Profile::Enabled()) [[unlikely]] {
+        ReportRecordSites();
+    }
     RecordImpl([signal_semaphore, wait_semaphore, signal_value, submit_upload,
                 this](vk::CommandBuffer cmdbuf, vk::CommandBuffer upload_cmdbuf) {
         static constexpr VkMemoryBarrier WRITE_BARRIER{

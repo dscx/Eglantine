@@ -9,10 +9,12 @@
 #include <chrono>
 #include <cstdlib>
 #include <deque>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <numeric>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -177,6 +179,9 @@ struct ThreadData {
     std::array<u64, static_cast<size_t>(Zone::Count)> count{};
     std::array<u64, 80> counters{}; ///< See Counter
     std::array<u64, static_cast<size_t>(FlushOrigin::Count)> flushes{};
+    /// Submissions by the Scheduler::Record call sites of their commands (AddSubmitSites): what
+    /// a submission carried, for the ones with few commands.
+    std::map<std::string, u64> submit_sites;
     u64 list_copy_done_ns{}; ///< Command list copies the front waited for: recorded to done
     u64 list_copy_done_count{};
     /// Executable methods the front sent with the value the register held (approximate top 16,
@@ -438,6 +443,14 @@ inline void AddFlush() {
     }
 }
 
+/// Scheduler::SubmitExecution: the commands recorded since the last submission, named by the
+/// call sites of Record (file:line, in order, the first few).
+inline void AddSubmitSites(std::string_view signature) {
+    if (Enabled()) {
+        ++t_data.submit_sites[std::string{signature}];
+    }
+}
+
 /// The front waited for a command list copy recorded at `recorded` (Now; 0 when not profiling)
 /// and it is done now.
 inline void AddListCopyDone(u64 recorded) {
@@ -591,6 +604,17 @@ inline void Report(const char* thread_name = "GPU thread") {
     if (!flushes.empty()) {
         flushes.pop_back();
         line += " | submits by origin:" + flushes;
+    }
+    if (!data.submit_sites.empty()) {
+        std::vector<std::pair<std::string_view, u64>> top(data.submit_sites.begin(),
+                                                          data.submit_sites.end());
+        std::ranges::sort(top, std::greater{}, &std::pair<std::string_view, u64>::second);
+        std::string sites;
+        for (size_t i = 0; i < top.size() && i < 12; ++i) {
+            sites += fmt::format(" [{}] {:.0f}/s;", top[i].first,
+                                 static_cast<double>(top[i].second) * 1e9 / window);
+        }
+        line += " | submissions by recorded sites:" + sites;
     }
     if (data.list_copy_done_count != 0) {
         line += fmt::format(" | list copy: {:.0f} us from submit to done ({:.0f}/s)",

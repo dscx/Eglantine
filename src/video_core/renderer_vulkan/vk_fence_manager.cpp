@@ -5,6 +5,7 @@
 
 #include "common/logging.h"
 #include "video_core/gpu_split.h"
+#include "video_core/nx2_perf.h"
 #include "video_core/renderer_vulkan/vk_buffer_cache.h"
 #include "video_core/renderer_vulkan/vk_fence_manager.h"
 #include "video_core/renderer_vulkan/vk_query_cache.h"
@@ -21,6 +22,13 @@ InnerFence::~InnerFence() = default;
 
 void InnerFence::Queue() {
     if (is_stubbed) {
+        return;
+    }
+    if (!scheduler.HasPendingWork() &&
+        VideoCommon::Nx2Perf::On(VideoCommon::Nx2Perf::Opt::SkipEmptySubmit)) {
+        // Nothing was recorded since the last submission: its tick covers everything this fence
+        // waits for, and a submission now would carry no work.
+        wait_tick = scheduler.CurrentTick() - 1;
         return;
     }
     // Get the current tick so we can wait for it

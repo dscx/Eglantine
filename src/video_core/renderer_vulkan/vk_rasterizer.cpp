@@ -2462,6 +2462,13 @@ void RasterizerVulkan::FlushCommands() {
         return;
     }
     draw_counter = 0;
+    if (!scheduler.HasPendingWork() &&
+        VideoCommon::Nx2Perf::On(VideoCommon::Nx2Perf::Opt::SkipEmptySubmit)) {
+        // The fence's own flush (InnerFence::Queue) just submitted the draws counted here;
+        // without the split's deferral this made a second, empty submission per fence (OoT on
+        // MoltenVK: ~560 a second, half of all submissions).
+        return;
+    }
     // Fences with downloads or queries come here right after queueing: ~9,400 a second in
     // Hyrule Warriors: Age of Imprisonment fights. Batched like the fences themselves.
     if (!scheduler.DeferFlush()) {

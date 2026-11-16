@@ -11,16 +11,20 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <source_location>
+#include <string>
 #include <thread>
 #include <utility>
 #include <queue>
 #include <span>
+#include <vector>
 
 #include "common/alignment.h"
 #include "common/common_types.h"
 #include "common/polyfill_thread.h"
 #include "common/settings.h"
 #include "video_core/gpu_split.h"
+#include "video_core/nx2_profile.h"
 #include "video_core/renderer_vulkan/fragment_barrier_state.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
@@ -200,23 +204,36 @@ public:
     /// a source depends on a pending copy, or the batch is full. Call outside a render pass.
     void RecordUpload(VkBuffer src, VkBuffer dst, std::span<const VkBufferCopy> copies);
 
-    /// Send work to a separate thread.
+    /// Send work to a separate thread. `site` names the caller in the EDEN_NX2_GPU_PROFILE
+    /// report of what each submission carried.
     template <typename T>
         requires std::is_invocable_v<T, vk::CommandBuffer, vk::CommandBuffer>
-    void RecordWithUploadBuffer(T&& command) {
+    void RecordWithUploadBuffer(T&& command,
+                                std::source_location site = std::source_location::current()) {
         if (VideoCommon::GpuSplit::check_owner) [[unlikely]] {
             VideoCommon::GpuSplit::CheckOwner("Scheduler::Record");
         }
         upload_cmdbuf_recorded = true;
+        work_recorded = true;
+        NoteRecordSite(site);
         RecordImpl(std::forward<T>(command));
     }
 
     template <typename T>
         requires std::is_invocable_v<T, vk::CommandBuffer>
-    void Record(T&& c) {
+    void Record(T&& c, std::source_location site = std::source_location::current()) {
+        work_recorded = true;
+        NoteRecordSite(site);
         RecordImpl([command = std::move(c)](vk::CommandBuffer cmdbuf, vk::CommandBuffer) {
             command(cmdbuf);
         });
+    }
+
+    /// Whether anything was recorded (or batched for recording) since the last submission, so
+    /// the next submission has work. When not, the last submitted tick, CurrentTick() - 1, already
+    /// covers every command handed to the scheduler.
+    [[nodiscard]] bool HasPendingWork() const noexcept {
+        return work_recorded || uploads_pending;
     }
 
     /// Whether the recording thread submitted `tick` within 20 ms.
@@ -296,6 +313,20 @@ public:
 private:
     std::chrono::steady_clock::time_point last_flush{};
     bool flush_pending{};
+
+    /// EDEN_NX2_GPU_PROFILE: remembers the first few Record call sites since the last submission.
+    void NoteRecordSite(const std::source_location& site) {
+        if (!VideoCommon::Nx2Profile::Enabled()) [[likely]] {
+            return;
+        }
+        if (record_sites.size() < MAX_RECORD_SITES) {
+            record_sites.emplace_back(site.file_name(), site.line());
+        } else {
+            ++record_sites_overflow;
+        }
+    }
+    /// EDEN_NX2_GPU_PROFILE: hands the sites of the submission being recorded to the profile.
+    void ReportRecordSites();
 
     template <typename T>
     void RecordImpl(T&& command) {
@@ -449,6 +480,11 @@ private:
     /// Whether a command for the upload command buffer was recorded since the last submission
     /// (recording thread). When none was, Nx2Perf upload_skip submits the main buffer alone.
     bool upload_cmdbuf_recorded{};
+    /// Whether any command was recorded since the last submission (recording thread).
+    bool work_recorded{};
+    static constexpr size_t MAX_RECORD_SITES = 6;
+    std::vector<std::pair<const char*, u32>> record_sites; ///< NoteRecordSite, this submission
+    u32 record_sites_overflow{};                            ///< Commands past MAX_RECORD_SITES
     void FlushUploads();
 
     VideoCommon::QueryCacheBase<QueryCacheParams>* query_cache = nullptr;
