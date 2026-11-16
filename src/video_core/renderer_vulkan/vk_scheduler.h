@@ -207,24 +207,16 @@ public:
         if (VideoCommon::GpuSplit::check_owner) [[unlikely]] {
             VideoCommon::GpuSplit::CheckOwner("Scheduler::Record");
         }
-        if (uploads_pending) {
-            // Pending uploads precede every other recorded command, including upload-buffer work.
-            FlushUploads();
-        }
-        if (chunk->Record(command)) {
-            return;
-        }
-        DispatchWork();
-        (void)chunk->Record(command);
+        upload_cmdbuf_recorded = true;
+        RecordImpl(std::forward<T>(command));
     }
 
     template <typename T>
         requires std::is_invocable_v<T, vk::CommandBuffer>
     void Record(T&& c) {
-        this->RecordWithUploadBuffer(
-            [command = std::move(c)](vk::CommandBuffer cmdbuf, vk::CommandBuffer) {
-                command(cmdbuf);
-            });
+        RecordImpl([command = std::move(c)](vk::CommandBuffer cmdbuf, vk::CommandBuffer) {
+            command(cmdbuf);
+        });
     }
 
     /// Whether the recording thread submitted `tick` within 20 ms.
@@ -304,6 +296,19 @@ public:
 private:
     std::chrono::steady_clock::time_point last_flush{};
     bool flush_pending{};
+
+    template <typename T>
+    void RecordImpl(T&& command) {
+        if (uploads_pending) {
+            // Pending uploads precede every other recorded command, including upload-buffer work.
+            FlushUploads();
+        }
+        if (chunk->Record(command)) {
+            return;
+        }
+        DispatchWork();
+        (void)chunk->Record(command);
+    }
 
     class Command {
     public:
@@ -441,6 +446,9 @@ private:
     std::unique_ptr<CommandPool> command_pool;
     std::unique_ptr<UploadBatch> upload_batch;
     bool uploads_pending{};
+    /// Whether a command for the upload command buffer was recorded since the last submission
+    /// (recording thread). When none was, Nx2Perf upload_skip submits the main buffer alone.
+    bool upload_cmdbuf_recorded{};
     void FlushUploads();
 
     VideoCommon::QueryCacheBase<QueryCacheParams>* query_cache = nullptr;

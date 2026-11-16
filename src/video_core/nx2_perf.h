@@ -98,6 +98,9 @@ enum class Opt : unsigned {
     /// Async shaders: keep FileEnvironments of graphics pipelines skipped at boot and replay their
     /// translation and compilation on background workers on first skippable use
     ReplayDiskRecordings,
+    /// A submission whose upload command buffer recorded nothing submits the main one alone
+    /// (on MoltenVK the empty one still became a Metal command buffer, ~0.2 ms each)
+    UploadSkip,
     Count,
 };
 
@@ -111,7 +114,7 @@ inline constexpr std::array<std::string_view, static_cast<size_t>(Opt::Count)> o
     "submit_while_waited", "pipeline_keep_preloaded", "bank_once_per_frame", "dirty_gather_fast",
     "handle_page_cache", "dma_forward", "draw_begin_coalesce", "pending_wake", "diag_draw_lite",
     "shader_build_budget", "compute_rebuild_async", "compute_preload_variants", "stale_target_skip",
-    "geometry_consistency", "build_order_priority", "replay_disk_recordings",
+    "geometry_consistency", "build_order_priority", "replay_disk_recordings", "upload_skip",
 };
 
 static_assert(static_cast<size_t>(Opt::Count) <= 64, "the off-mask is 64 bits");

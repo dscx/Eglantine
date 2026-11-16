@@ -4,10 +4,12 @@
 // SPDX-FileCopyrightText: Copyright 2019 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <thread>
 #include <utility>
 
@@ -452,8 +454,12 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
     draws_since_submit = 0;
 
     const u64 signal_value = master_semaphore->NextTick();
-    RecordWithUploadBuffer([signal_semaphore, wait_semaphore, signal_value,
-                            this](vk::CommandBuffer cmdbuf, vk::CommandBuffer upload_cmdbuf) {
+    // The upload command buffer is submitted when something was recorded into it since the last
+    // submission. The submit command below is recorded through RecordImpl so it does not count.
+    const bool submit_upload = std::exchange(upload_cmdbuf_recorded, false) ||
+                               !VideoCommon::Nx2Perf::On(VideoCommon::Nx2Perf::Opt::UploadSkip);
+    RecordImpl([signal_semaphore, wait_semaphore, signal_value, submit_upload,
+                this](vk::CommandBuffer cmdbuf, vk::CommandBuffer upload_cmdbuf) {
         static constexpr VkMemoryBarrier WRITE_BARRIER{
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
             .pNext = nullptr,
@@ -466,7 +472,10 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
             .srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
             .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
         };
-        upload_cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, WRITE_BARRIER);
+        if (submit_upload) {
+            upload_cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, WRITE_BARRIER);
+        }
         upload_cmdbuf.End();
         cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, READ_BARRIER);
         cmdbuf.End();
@@ -475,9 +484,14 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
             on_submit();
         }
 
+        const std::array<VkCommandBuffer, 2> handles{*upload_cmdbuf, *cmdbuf};
+        const std::span<const VkCommandBuffer> cmdbuffers =
+            submit_upload ? std::span<const VkCommandBuffer>{handles}
+                          : std::span<const VkCommandBuffer>{handles}.subspan(1);
+
         std::scoped_lock lock{submit_mutex};
         switch (const VkResult result = master_semaphore->SubmitQueue(
-                    cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value)) {
+                    cmdbuffers, signal_semaphore, wait_semaphore, signal_value)) {
         case VK_SUCCESS:
             // Log successful queue submission
             if (GPU::Logging::IsActive() &&

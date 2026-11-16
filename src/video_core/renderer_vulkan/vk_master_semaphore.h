@@ -12,6 +12,7 @@
 #include <mutex>
 #include <thread>
 #include <queue>
+#include <span>
 
 #include "common/common_types.h"
 #include "common/polyfill_thread.h"
@@ -54,15 +55,19 @@ public:
     /// Waits for a tick to be hit on the GPU
     void Wait(u64 tick);
 
-    /// Submits the device graphics queue, updating the tick as necessary
-    VkResult SubmitQueue(vk::CommandBuffer& cmdbuf, vk::CommandBuffer& upload_cmdbuf,
-                         VkSemaphore signal_semaphore, VkSemaphore wait_semaphore, u64 host_tick);
+    /// Most command buffers one SubmitQueue takes: the upload one and the main one.
+    static constexpr size_t MAX_SUBMIT_CMDBUFFERS = 2;
+
+    /// Submits the device graphics queue, updating the tick as necessary. `cmdbuffers` run in
+    /// order: one or two of them (the upload command buffer, when it has work, then the main one).
+    VkResult SubmitQueue(std::span<const VkCommandBuffer> cmdbuffers, VkSemaphore signal_semaphore,
+                         VkSemaphore wait_semaphore, u64 host_tick);
 
 private:
-    VkResult SubmitQueueTimeline(vk::CommandBuffer& cmdbuf, vk::CommandBuffer& upload_cmdbuf,
+    VkResult SubmitQueueTimeline(std::span<const VkCommandBuffer> cmdbuffers,
                                  VkSemaphore signal_semaphore, VkSemaphore wait_semaphore,
                                  u64 host_tick);
-    VkResult SubmitQueueFence(vk::CommandBuffer& cmdbuf, vk::CommandBuffer& upload_cmdbuf,
+    VkResult SubmitQueueFence(std::span<const VkCommandBuffer> cmdbuffers,
                               VkSemaphore signal_semaphore, VkSemaphore wait_semaphore,
                               u64 host_tick);
 
