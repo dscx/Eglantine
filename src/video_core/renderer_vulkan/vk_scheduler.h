@@ -26,6 +26,7 @@
 #include "video_core/gpu_split.h"
 #include "video_core/nx2_profile.h"
 #include "video_core/renderer_vulkan/fragment_barrier_state.h"
+#include "video_core/renderer_vulkan/wait_for_idle_state.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
@@ -124,6 +125,10 @@ public:
     bool HasFragmentBarrier() const {
         return fragment_barrier.Pending();
     }
+
+    /// Records the full barrier of a guest wait for idle over `stages`. Inside a render pass
+    /// (Nx2Perf wfi_defer) the barrier is recorded when the pass ends instead of ending it.
+    void WaitForIdleBarrier(VkPipelineStageFlags stages);
 
     void NoteRenderPassStores() {
         render_pass_has_stores = true;
@@ -481,6 +486,11 @@ private:
 
     void EndRenderPassImpl(const char* reason);
 
+    void RecordWaitForIdleBarrier(VkPipelineStageFlags stages);
+
+    /// Records the barrier of the deferred waits for idle, if any; only outside a render pass.
+    void FlushDeferredWaitForIdle(const char* reason);
+
     void AcquireNewChunk();
 
     const Device& device;
@@ -488,6 +498,7 @@ private:
 
     std::unique_ptr<MasterSemaphore> master_semaphore;
     FragmentBarrierState fragment_barrier;
+    WaitForIdleState wait_for_idle;
     bool render_pass_has_stores{};
     bool render_pass_wrote_depth{}; ///< NoteDepthStencilWrite, cleared at every pass end
     bool compute_writes_pending{};

@@ -231,6 +231,7 @@ add_library(video_core STATIC
     renderer_vulkan/vk_scheduler.cpp
     renderer_vulkan/vk_scheduler.h
     renderer_vulkan/fragment_barrier_state.h
+    renderer_vulkan/wait_for_idle_state.h
     renderer_vulkan/vk_shader_util.cpp
     renderer_vulkan/vk_shader_util.h
     renderer_vulkan/vk_staging_buffer_pool.cpp

@@ -109,6 +109,10 @@ enum class Opt : unsigned {
     /// depth or stencil since it began or the draw does; the last pass end stored the tiles the
     /// read needs (three quarters of the ~800 pass ends a frame in an OoT 3D scene on MoltenVK)
     FeedbackDepthReadOnly,
+    /// A guest wait for idle inside a render pass defers its barrier to the pass end instead of
+    /// ending the pass; a later draw that reads what the pass stored still ends it, as for the
+    /// deferred fragment barrier (one in ten of the pass ends left in an OoT 3D scene on MoltenVK)
+    WfiDefer,
     Count,
 };
 
@@ -123,7 +127,7 @@ inline constexpr std::array<std::string_view, static_cast<size_t>(Opt::Count)> o
     "handle_page_cache", "dma_forward", "draw_begin_coalesce", "pending_wake", "diag_draw_lite",
     "shader_build_budget", "compute_rebuild_async", "compute_preload_variants", "stale_target_skip",
     "geometry_consistency", "build_order_priority", "replay_disk_recordings", "upload_skip",
-    "skip_empty_submit", "feedback_depth_readonly",
+    "skip_empty_submit", "feedback_depth_readonly", "wfi_defer",
 };
 
 static_assert(static_cast<size_t>(Opt::Count) <= 64, "the off-mask is 64 bits");
@@ -156,7 +160,7 @@ inline constexpr u64 DefaultOffMask() {
                           Opt::DownloadBatch, Opt::PipelineFastCache, Opt::DrawPreamble,
                           Opt::BindMemo, Opt::SubmitWhileWaited, Opt::DmaForward,
                           Opt::BankOncePerFrame, Opt::DrawBeginCoalesce, Opt::PendingWake,
-                          Opt::DiagDrawLite}) {
+                          Opt::DiagDrawLite, Opt::FeedbackDepthReadOnly, Opt::WfiDefer}) {
         mask |= Bit(opt);
     }
     return mask;

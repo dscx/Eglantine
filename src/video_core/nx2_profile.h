@@ -185,6 +185,9 @@ struct ThreadData {
     /// Render pass ends by reason (AddRenderPassEnd): the RequestOutsideRenderPassOperationContext
     /// call site (file:line) or the scheduler's own reason (render target change, submit, ...).
     std::map<std::string, u64> render_pass_ends;
+    u64 wfi_deferred{}; ///< Wait-for-idle barriers deferred to a pass end (AddWfiDeferred)
+    /// Deferred wait-for-idle barriers recorded at a pass end, by that end's reason
+    std::map<std::string, u64> wfi_realized;
     u64 list_copy_done_ns{}; ///< Command list copies the front waited for: recorded to done
     u64 list_copy_done_count{};
     /// Executable methods the front sent with the value the register held (approximate top 16,
@@ -462,6 +465,20 @@ inline void AddRenderPassEnd(std::string_view reason) {
     }
 }
 
+/// Scheduler::WaitForIdleBarrier deferred a guest wait for idle to the end of the render pass.
+inline void AddWfiDeferred() {
+    if (Enabled()) {
+        ++t_data.wfi_deferred;
+    }
+}
+
+/// A deferred wait-for-idle barrier was recorded at a pass end whose reason is `reason`.
+inline void AddWfiRealized(std::string_view reason) {
+    if (Enabled()) {
+        ++t_data.wfi_realized[std::string{reason}];
+    }
+}
+
 /// The front waited for a command list copy recorded at `recorded` (Now; 0 when not profiling)
 /// and it is done now.
 inline void AddListCopyDone(u64 recorded) {
@@ -632,6 +649,11 @@ inline void Report(const char* thread_name = "GPU thread") {
     }
     if (!data.render_pass_ends.empty()) {
         line += " | render pass ends by reason:" + top_counts(data.render_pass_ends);
+    }
+    if (data.wfi_deferred != 0) {
+        line += fmt::format(" | WFI deferred: {:.0f}/s; its barriers by pass end reason:",
+                            static_cast<double>(data.wfi_deferred) * 1e9 / window) +
+                top_counts(data.wfi_realized);
     }
     if (data.list_copy_done_count != 0) {
         line += fmt::format(" | list copy: {:.0f} us from submit to done ({:.0f}/s)",

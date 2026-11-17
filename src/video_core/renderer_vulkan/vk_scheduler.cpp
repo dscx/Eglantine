@@ -330,6 +330,48 @@ void Scheduler::FlushDeferredClear() {
     EndRenderPass("flush deferred clear");
 }
 
+void Scheduler::WaitForIdleBarrier(VkPipelineStageFlags stages) {
+    const bool pass_pending =
+        state.renderpass != VK_NULL_HANDLE || deferred_clear.framebuffer != nullptr;
+    // Transform feedback output read by a later draw relies on the pass ending at the wait, so
+    // devices with the extension keep the pass end.
+    if (pass_pending && !device.IsExtTransformFeedbackSupported() &&
+        VideoCommon::Nx2Perf::On(VideoCommon::Nx2Perf::Opt::WfiDefer)) {
+        wait_for_idle.Defer(stages);
+        if (state.renderpass != VK_NULL_HANDLE) {
+            // A later draw that reads what this pass stored ends it (GraphicsPipeline::Configure)
+            fragment_barrier.Defer(true);
+        }
+        VideoCommon::Nx2Profile::AddWfiDeferred();
+        return;
+    }
+    EndRenderPass("wait for idle");
+    RecordWaitForIdleBarrier(stages);
+}
+
+void Scheduler::RecordWaitForIdleBarrier(VkPipelineStageFlags stages) {
+    Record([stages](vk::CommandBuffer cmdbuf) {
+        // Later work waits for the earlier work and sees its writes.
+        static constexpr VkMemoryBarrier WFI_BARRIER{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+        };
+        cmdbuf.PipelineBarrier(stages, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, WFI_BARRIER);
+    });
+}
+
+void Scheduler::FlushDeferredWaitForIdle(const char* reason) {
+    if (!wait_for_idle.Pending()) {
+        return;
+    }
+    if (reason != nullptr) {
+        VideoCommon::Nx2Profile::AddWfiRealized(reason);
+    }
+    RecordWaitForIdleBarrier(wait_for_idle.Take());
+}
+
 void Scheduler::RequestRenderpass(const Framebuffer* framebuffer) {
     if (deferred_clear.framebuffer == framebuffer) {
         RealizeDeferredClear();
@@ -590,6 +632,7 @@ void Scheduler::EndRenderPassImpl(const char* reason)
     {
         RealizeDeferredClear();
         if (!state.renderpass) {
+            FlushDeferredWaitForIdle(reason);
             return;
         }
         if (reason != nullptr) {
@@ -670,6 +713,7 @@ void Scheduler::EndRenderPassImpl(const char* reason)
 
         state.renderpass = VkRenderPass{};
         num_renderpass_images = 0;
+        FlushDeferredWaitForIdle(reason);
     }
 
 
