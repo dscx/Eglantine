@@ -105,6 +105,10 @@ enum class Opt : unsigned {
     /// waits for the last submitted tick, and FlushCommands after a fence's own flush returns
     /// (about half of the submissions in an OoT 3D scene on MoltenVK carried no command)
     SkipEmptySubmit,
+    /// A draw that samples the bound depth buffer ends the render pass only when the pass wrote
+    /// depth or stencil since it began or the draw does; the last pass end stored the tiles the
+    /// read needs (three quarters of the ~800 pass ends a frame in an OoT 3D scene on MoltenVK)
+    FeedbackDepthReadOnly,
     Count,
 };
 
@@ -119,7 +123,7 @@ inline constexpr std::array<std::string_view, static_cast<size_t>(Opt::Count)> o
     "handle_page_cache", "dma_forward", "draw_begin_coalesce", "pending_wake", "diag_draw_lite",
     "shader_build_budget", "compute_rebuild_async", "compute_preload_variants", "stale_target_skip",
     "geometry_consistency", "build_order_priority", "replay_disk_recordings", "upload_skip",
-    "skip_empty_submit",
+    "skip_empty_submit", "feedback_depth_readonly",
 };
 
 static_assert(static_cast<size_t>(Opt::Count) <= 64, "the off-mask is 64 bits");

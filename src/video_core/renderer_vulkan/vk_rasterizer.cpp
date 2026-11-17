@@ -1071,6 +1071,9 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
         report_failure("configure failed");
         return;
     }
+    if (maxwell3d->regs.WritesDepthStencil()) {
+        scheduler.NoteDepthStencilWrite();
+    }
     if (frame_dump.Capturing()) {
         frame_dump.NoteKeys(pipeline->ShaderHashes(),
                             pipeline_cache.GraphicsNativeKeys(pipeline->ShaderHashes()));
@@ -1824,6 +1827,7 @@ void RasterizerVulkan::Clear(u32 layer_count) {
         blit_image.ClearDepthStencil(framebuffer, use_depth, regs.clear_depth,
                                      u8(regs.stencil_front_mask), regs.clear_stencil,
                                      regs.stencil_front_func_mask, dst_region);
+        scheduler.NoteDepthStencilWrite();
     } else if (can_defer_clear) {
         VkClearValue ds_value{};
         ds_value.depthStencil.depth = regs.clear_depth;
@@ -1839,6 +1843,7 @@ void RasterizerVulkan::Clear(u32 layer_count) {
             attachment.clearValue.depthStencil.stencil = clear_stencil;
             cmdbuf.ClearAttachments(attachment, clear_rect);
         });
+        scheduler.NoteDepthStencilWrite();
     }
 }
 

@@ -288,6 +288,9 @@ void Scheduler::RealizeDeferredClear() {
         dc.color_clear_mask, dc.depth_stencil, color_discard_mask, depth_stencil_discard);
     EndRenderPass("deferred clear");
     BeginRenderPassImpl(dc.framebuffer, renderpass, clear_values.data(), count);
+    if (dc.depth_stencil) {
+        render_pass_wrote_depth = true;
+    }
 }
 
 bool Scheduler::DeferColorClear(const Framebuffer* framebuffer, u32 rt_slot,
@@ -595,6 +598,7 @@ void Scheduler::EndRenderPassImpl(const char* reason)
         ++recording_epoch;
         fragment_barrier.Reset();
         render_pass_has_stores = false;
+        render_pass_wrote_depth = false;
 
         query_cache->CounterClose(VideoCommon::QueryType::StreamingByteCount);
 

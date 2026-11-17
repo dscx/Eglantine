@@ -206,7 +206,9 @@ public:
         return view_formats[static_cast<std::size_t>(format)];
     }
 
-    void BarrierFeedbackLoop();
+    /// A draw samples the bound depth buffer: ends the render pass so its tiles are stored first,
+    /// unless nothing wrote depth or stencil since the pass began and this draw writes neither.
+    void BarrierFeedbackLoop(bool draw_writes_depth_stencil);
 
     bool IsFormatDitherable(VideoCore::Surface::PixelFormat format);
     bool IsFormatScalable(VideoCore::Surface::PixelFormat format);

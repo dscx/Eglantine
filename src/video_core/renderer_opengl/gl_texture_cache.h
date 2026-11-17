@@ -147,7 +147,7 @@ public:
         return state_tracker;
     }
 
-    void BarrierFeedbackLoop() const noexcept {
+    void BarrierFeedbackLoop(bool /*draw_writes_depth_stencil*/) const noexcept {
         // OpenGL does not require a barrier for attachment feedback loops.
     }
 

@@ -23,6 +23,7 @@
 #include "common/literals.h"
 #include "common/settings.h"
 
+#include "video_core/nx2_perf.h"
 #include "video_core/renderer_vulkan/vk_texture_cache.h"
 #include "video_core/nx2.h"
 #include "video_core/gpu_logging/gpu_logging.h"
@@ -1516,7 +1517,12 @@ void TextureCacheRuntime::EraseResolveShadow(VkImage msaa_image) {
     resolve_shadows.erase(it);
 }
 
-void TextureCacheRuntime::BarrierFeedbackLoop() {
+void TextureCacheRuntime::BarrierFeedbackLoop(bool draw_writes_depth_stencil) {
+    if (!draw_writes_depth_stencil && !scheduler.RenderPassWroteDepthStencil() &&
+        VideoCommon::Nx2Perf::On(VideoCommon::Nx2Perf::Opt::FeedbackDepthReadOnly)) {
+        // The last pass end stored the depth tiles and nothing has changed them since
+        return;
+    }
     scheduler.RequestOutsideRenderPassOperationContext();
 }
 

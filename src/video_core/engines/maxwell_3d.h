@@ -3057,6 +3057,15 @@ public:
             };
             std::array<u32, NUM_REGS> reg_array;
         };
+
+        /// A draw with this state writes the depth or stencil attachment: depth writes need the
+        /// depth test, stencil writes a non-zero mask (the back mask only when two-sided).
+        [[nodiscard]] bool WritesDepthStencil() const noexcept {
+            const bool stencil = stencil_enable != 0 &&
+                                 (stencil_front_mask != 0 ||
+                                  (stencil_two_side_enable != 0 && stencil_back_mask != 0));
+            return (depth_test_enable != 0 && depth_write_enabled != 0) || stencil;
+        }
     };
     // clang-format on
 

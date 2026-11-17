@@ -133,6 +133,16 @@ public:
         return render_pass_has_stores;
     }
 
+    /// A draw, clear or blit wrote the depth or stencil attachment inside the active pass.
+    void NoteDepthStencilWrite() {
+        render_pass_wrote_depth = true;
+    }
+
+    /// Whether the active render pass wrote its depth or stencil attachment since it began.
+    bool RenderPassWroteDepthStencil() const {
+        return render_pass_wrote_depth;
+    }
+
     /// A dispatch was recorded: the next render pass must see what it wrote.
     void NoteComputeWrites() {
         compute_writes_pending = true;
@@ -479,6 +489,7 @@ private:
     std::unique_ptr<MasterSemaphore> master_semaphore;
     FragmentBarrierState fragment_barrier;
     bool render_pass_has_stores{};
+    bool render_pass_wrote_depth{}; ///< NoteDepthStencilWrite, cleared at every pass end
     bool compute_writes_pending{};
     bool graphics_pipeline_missing{};
     std::unique_ptr<CommandPool> command_pool;

@@ -763,7 +763,7 @@ void TextureCache<P>::CheckFeedbackLoop(std::span<const ImageViewInOut> views) {
     if (render_targets_serial == last_feedback_loop_serial &&
         texture_bindings_serial == last_feedback_texture_serial) {
         if (last_feedback_loop_result) {
-            runtime.BarrierFeedbackLoop();
+            runtime.BarrierFeedbackLoop(maxwell3d->regs.WritesDepthStencil());
         }
         return;
     }
@@ -825,7 +825,7 @@ void TextureCache<P>::CheckFeedbackLoop(std::span<const ImageViewInOut> views) {
     last_feedback_texture_serial = texture_bindings_serial;
     last_feedback_loop_result = requires_barrier;
     if (requires_barrier) {
-        runtime.BarrierFeedbackLoop();
+        runtime.BarrierFeedbackLoop(maxwell3d->regs.WritesDepthStencil());
     }
 }
 
