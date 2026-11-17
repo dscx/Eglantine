@@ -109,11 +109,12 @@ public:
 
     /// Requests the current execution context to be able to execute operations only allowed outside
     /// of a renderpass.
-    void RequestOutsideRenderPassOperationContext() {
+    void RequestOutsideRenderPassOperationContext(
+        std::source_location site = std::source_location::current()) {
         if (!state.renderpass && deferred_clear.framebuffer == nullptr) {
             return;
         }
-        EndRenderPass();
+        EndRenderPass(site);
     }
 
     void DeferFragmentBarrier() {
@@ -462,7 +463,13 @@ private:
 
     void EndPendingOperations();
 
-    void EndRenderPass();
+    /// Ends the active render pass; `reason` names why for the EDEN_NX2_GPU_PROFILE report.
+    void EndRenderPass(const char* reason);
+
+    /// Ends the active render pass for a RequestOutsideRenderPassOperationContext caller at `site`.
+    void EndRenderPass(const std::source_location& site);
+
+    void EndRenderPassImpl(const char* reason);
 
     void AcquireNewChunk();
 

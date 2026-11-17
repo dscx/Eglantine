@@ -182,6 +182,9 @@ struct ThreadData {
     /// Submissions by the Scheduler::Record call sites of their commands (AddSubmitSites): what
     /// a submission carried, for the ones with few commands.
     std::map<std::string, u64> submit_sites;
+    /// Render pass ends by reason (AddRenderPassEnd): the RequestOutsideRenderPassOperationContext
+    /// call site (file:line) or the scheduler's own reason (render target change, submit, ...).
+    std::map<std::string, u64> render_pass_ends;
     u64 list_copy_done_ns{}; ///< Command list copies the front waited for: recorded to done
     u64 list_copy_done_count{};
     /// Executable methods the front sent with the value the register held (approximate top 16,
@@ -451,6 +454,14 @@ inline void AddSubmitSites(std::string_view signature) {
     }
 }
 
+/// Scheduler::EndRenderPass ended an active render pass for `reason`: the call site of
+/// RequestOutsideRenderPassOperationContext (file:line) or the scheduler's own reason.
+inline void AddRenderPassEnd(std::string_view reason) {
+    if (Enabled()) {
+        ++t_data.render_pass_ends[std::string{reason}];
+    }
+}
+
 /// The front waited for a command list copy recorded at `recorded` (Now; 0 when not profiling)
 /// and it is done now.
 inline void AddListCopyDone(u64 recorded) {
@@ -605,16 +616,22 @@ inline void Report(const char* thread_name = "GPU thread") {
         flushes.pop_back();
         line += " | submits by origin:" + flushes;
     }
-    if (!data.submit_sites.empty()) {
-        std::vector<std::pair<std::string_view, u64>> top(data.submit_sites.begin(),
-                                                          data.submit_sites.end());
+    // The 12 most counted keys of a map, as " [key] N/s;"
+    const auto top_counts = [window](const std::map<std::string, u64>& counts) {
+        std::vector<std::pair<std::string_view, u64>> top(counts.begin(), counts.end());
         std::ranges::sort(top, std::greater{}, &std::pair<std::string_view, u64>::second);
-        std::string sites;
+        std::string text;
         for (size_t i = 0; i < top.size() && i < 12; ++i) {
-            sites += fmt::format(" [{}] {:.0f}/s;", top[i].first,
-                                 static_cast<double>(top[i].second) * 1e9 / window);
+            text += fmt::format(" [{}] {:.0f}/s;", top[i].first,
+                                static_cast<double>(top[i].second) * 1e9 / window);
         }
-        line += " | submissions by recorded sites:" + sites;
+        return text;
+    };
+    if (!data.submit_sites.empty()) {
+        line += " | submissions by recorded sites:" + top_counts(data.submit_sites);
+    }
+    if (!data.render_pass_ends.empty()) {
+        line += " | render pass ends by reason:" + top_counts(data.render_pass_ends);
     }
     if (data.list_copy_done_count != 0) {
         line += fmt::format(" | list copy: {:.0f} us from submit to done ({:.0f}/s)",
