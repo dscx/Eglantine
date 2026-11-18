@@ -188,6 +188,11 @@ struct ThreadData {
     u64 wfi_deferred{}; ///< Wait-for-idle barriers deferred to a pass end (AddWfiDeferred)
     /// Deferred wait-for-idle barriers recorded at a pass end, by that end's reason
     std::map<std::string, u64> wfi_realized;
+    /// Render target changes (AddRenderTargetChange): "from -end reason-> to", a target as
+    /// WxH/color formats+depth format
+    std::map<std::string, u64> render_target_changes;
+    /// Render passes by their RequestRenderpass calls (draws, clears) and target: "[1] from"
+    std::map<std::string, u64> render_pass_sizes;
     u64 list_copy_done_ns{}; ///< Command list copies the front waited for: recorded to done
     u64 list_copy_done_count{};
     /// Executable methods the front sent with the value the register held (approximate top 16,
@@ -479,6 +484,15 @@ inline void AddWfiRealized(std::string_view reason) {
     }
 }
 
+/// Scheduler::BeginRenderPassImpl after an earlier pass: `transition` names the last pass's
+/// targets, the reason it ended and the new targets; `size` the last pass by its draw requests.
+inline void AddRenderTargetChange(std::string transition, std::string size) {
+    if (Enabled()) {
+        ++t_data.render_target_changes[std::move(transition)];
+        ++t_data.render_pass_sizes[std::move(size)];
+    }
+}
+
 /// The front waited for a command list copy recorded at `recorded` (Now; 0 when not profiling)
 /// and it is done now.
 inline void AddListCopyDone(u64 recorded) {
@@ -633,12 +647,13 @@ inline void Report(const char* thread_name = "GPU thread") {
         flushes.pop_back();
         line += " | submits by origin:" + flushes;
     }
-    // The 12 most counted keys of a map, as " [key] N/s;"
-    const auto top_counts = [window](const std::map<std::string, u64>& counts) {
+    // The `limit` most counted keys of a map, as " [key] N/s;"
+    const auto top_counts = [window](const std::map<std::string, u64>& counts,
+                                     size_t limit = 12) {
         std::vector<std::pair<std::string_view, u64>> top(counts.begin(), counts.end());
         std::ranges::sort(top, std::greater{}, &std::pair<std::string_view, u64>::second);
         std::string text;
-        for (size_t i = 0; i < top.size() && i < 12; ++i) {
+        for (size_t i = 0; i < top.size() && i < limit; ++i) {
             text += fmt::format(" [{}] {:.0f}/s;", top[i].first,
                                 static_cast<double>(top[i].second) * 1e9 / window);
         }
@@ -654,6 +669,11 @@ inline void Report(const char* thread_name = "GPU thread") {
         line += fmt::format(" | WFI deferred: {:.0f}/s; its barriers by pass end reason:",
                             static_cast<double>(data.wfi_deferred) * 1e9 / window) +
                 top_counts(data.wfi_realized);
+    }
+    if (!data.render_target_changes.empty()) {
+        line += " | render target changes (from -reason-> to):" +
+                top_counts(data.render_target_changes, 16);
+        line += " | render passes by draw requests:" + top_counts(data.render_pass_sizes, 16);
     }
     if (data.list_copy_done_count != 0) {
         line += fmt::format(" | list copy: {:.0f} us from submit to done ({:.0f}/s)",

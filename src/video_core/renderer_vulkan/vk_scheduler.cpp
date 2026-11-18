@@ -32,6 +32,7 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_state_tracker.h"
 #include "video_core/renderer_vulkan/vk_texture_cache.h"
+#include "video_core/texture_cache/formatter.h"
 #include "video_core/vulkan_common/vulkan_device.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
@@ -206,8 +207,59 @@ void Scheduler::FlushUploads() {
     Record(std::move(command));
 }
 
+namespace {
+/// A pass's targets for the profile: WxH/color formats+depth format, " msaa" when sampled.
+std::string DescribeTargets(const Framebuffer& framebuffer) {
+    using VideoCore::Surface::PixelFormat;
+    const VkExtent2D area = framebuffer.RenderArea();
+    const RenderPassKey& key = framebuffer.RenderPassKeyBase();
+    std::string text = fmt::format("{}x{}", area.width, area.height);
+    for (const PixelFormat format : key.color_formats) {
+        if (format != PixelFormat::Invalid) {
+            text += fmt::format("/{}", format);
+        }
+    }
+    text += framebuffer.HasAspectDepthBit() ? fmt::format("+{}", key.depth_format) : "+-";
+    if (framebuffer.Samples() != VK_SAMPLE_COUNT_1_BIT) {
+        text += " msaa";
+    }
+    return text;
+}
+
+const char* RequestsBucket(u32 requests) {
+    if (requests <= 2) {
+        return requests == 1 ? "1" : "2";
+    }
+    if (requests <= 4) {
+        return "3-4";
+    }
+    if (requests <= 8) {
+        return "5-8";
+    }
+    if (requests <= 16) {
+        return "9-16";
+    }
+    return requests <= 32 ? "17-32" : "33+";
+}
+} // Anonymous namespace
+
+void Scheduler::NoteRenderTargetChange(const Framebuffer& framebuffer) {
+    std::string targets = DescribeTargets(framebuffer);
+    if (!pass_targets.empty()) {
+        VideoCommon::Nx2Profile::AddRenderTargetChange(
+            fmt::format("{} -{}-> {}", pass_targets, pass_end_reason, targets),
+            fmt::format("[{}] {}", RequestsBucket(pass_requests), pass_targets));
+    }
+    pass_targets = std::move(targets);
+    pass_end_reason.clear();
+    pass_requests = 1;
+}
+
 void Scheduler::BeginRenderPassImpl(const Framebuffer* framebuffer, VkRenderPass renderpass,
                                     const VkClearValue* clear_values, u32 clear_value_count) {
+    if (VideoCommon::Nx2Profile::Enabled()) [[unlikely]] {
+        NoteRenderTargetChange(*framebuffer);
+    }
     const VkFramebuffer framebuffer_handle = framebuffer->Handle();
     const VkExtent2D render_area = framebuffer->RenderArea();
     state.renderpass = framebuffer->RenderPass();
@@ -383,6 +435,7 @@ void Scheduler::RequestRenderpass(const Framebuffer* framebuffer) {
     if (renderpass == state.renderpass && framebuffer_handle == state.framebuffer &&
         render_area.width == state.render_area.width &&
         render_area.height == state.render_area.height) {
+        ++pass_requests;
         return;
     }
     // Ends any active pass and realizes a deferred clear
@@ -637,6 +690,9 @@ void Scheduler::EndRenderPassImpl(const char* reason)
         }
         if (reason != nullptr) {
             VideoCommon::Nx2Profile::AddRenderPassEnd(reason);
+            if (VideoCommon::Nx2Profile::Enabled()) [[unlikely]] {
+                pass_end_reason = reason;
+            }
         }
         ++recording_epoch;
         fragment_barrier.Reset();

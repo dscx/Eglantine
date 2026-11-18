@@ -490,6 +490,9 @@ private:
 
     /// Records the barrier of the deferred waits for idle, if any; only outside a render pass.
     void FlushDeferredWaitForIdle(const char* reason);
+    /// Profile only: counts the change from the last pass to `framebuffer` and resets the
+    /// per-pass profile state (BeginRenderPassImpl).
+    void NoteRenderTargetChange(const Framebuffer& framebuffer);
 
     void AcquireNewChunk();
 
@@ -501,6 +504,11 @@ private:
     WaitForIdleState wait_for_idle;
     bool render_pass_has_stores{};
     bool render_pass_wrote_depth{}; ///< NoteDepthStencilWrite, cleared at every pass end
+    /// Profile only (EDEN_NX2_GPU_PROFILE): the active or last pass's targets, its
+    /// RequestRenderpass calls and the reason it ended, reported at the next pass begin.
+    std::string pass_targets;
+    std::string pass_end_reason;
+    u32 pass_requests = 0;
     bool compute_writes_pending{};
     bool graphics_pipeline_missing{};
     std::unique_ptr<CommandPool> command_pool;
