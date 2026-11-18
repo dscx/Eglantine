@@ -39,9 +39,16 @@ TEST_CASE("Deferred wait for idle: one barrier for a run of waits", "[video_core
     }
 }
 
-TEST_CASE("Nx2Perf wfi_defer is on by default and off under SAFE", "[nx2_perf]") {
+TEST_CASE("Nx2Perf wfi_defer is off until EDEN_NX2_PERF_ON names it", "[nx2_perf]") {
     REQUIRE(opt_names[Index(Opt::WfiDefer)] == "wfi_defer");
-    REQUIRE(!IsOff(ParseOffMask(false, "", ""), Index(Opt::WfiDefer)));
-    REQUIRE(IsOff(ParseOffMask(true, "", ""), Index(Opt::WfiDefer)));
-    REQUIRE(ParseOffMask(false, "", "wfi_defer") == Bit(Opt::WfiDefer));
+    REQUIRE(IsOff(OffUntilNamedMask(), Index(Opt::WfiDefer)));
+    // ParseOffMask alone keeps its contract: normal mode turns nothing off.
+    REQUIRE(ParseOffMask(false, "", "") == u64{0});
+    REQUIRE(StartOffMask(false, "", "") == OffUntilNamedMask());
+    REQUIRE(IsOff(StartOffMask(true, "", ""), Index(Opt::WfiDefer)));
+    REQUIRE(!IsOff(StartOffMask(false, "", ""), Index(Opt::FeedbackDepthReadOnly)));
+    REQUIRE(!IsOff(StartOffMask(false, "wfi_defer", ""), Index(Opt::WfiDefer)));
+    REQUIRE(!IsOff(StartOffMask(true, "wfi_defer", ""), Index(Opt::WfiDefer)));
+    REQUIRE(IsOff(StartOffMask(false, "wfi_defer", "wfi_defer"), Index(Opt::WfiDefer)));
+    REQUIRE(StartOffMask(false, "", "bind_memo") == (OffUntilNamedMask() | Bit(Opt::BindMemo)));
 }

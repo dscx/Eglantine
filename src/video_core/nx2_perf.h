@@ -12,9 +12,9 @@
 #include "common/common_types.h"
 #include "common/logging.h"
 
-// Switches for the NX2 GPU optimizations, all on by default (names in opt_names).
-// EDEN_NX2_PERF_OPT=0 turns every one off; EDEN_NX2_PERF_SAFE=1 turns off the experimental ones
-// (DefaultOffMask); EDEN_NX2_PERF_ON=<name>,... turns named ones back on and
+// Switches for the NX2 GPU optimizations, on by default except the few in OffUntilNamedMask
+// (names in opt_names). EDEN_NX2_PERF_OPT=0 turns every one off; EDEN_NX2_PERF_SAFE=1 turns off
+// the experimental ones (DefaultOffMask); EDEN_NX2_PERF_ON=<name>,... turns named ones on and
 // EDEN_NX2_PERF_OFF=<name>,... turns named ones off. EDEN_NX2_PERF_VERIFY=1 computes each
 // optimized answer the old way too, logs any difference and uses the old answer.
 namespace VideoCommon::Nx2Perf {
@@ -111,7 +111,8 @@ enum class Opt : unsigned {
     FeedbackDepthReadOnly,
     /// A guest wait for idle inside a render pass defers its barrier to the pass end instead of
     /// ending the pass; a later draw that reads what the pass stored still ends it, as for the
-    /// deferred fragment barrier (one in ten of the pass ends left in an OoT 3D scene on MoltenVK)
+    /// deferred fragment barrier. Off until named: in an OoT 3D scene on MoltenVK the wait is
+    /// followed by a render target change, so the pass end only moved (297 -> 296 a frame)
     WfiDefer,
     Count,
 };
@@ -166,22 +167,13 @@ inline constexpr u64 DefaultOffMask() {
     return mask;
 }
 
-/// The off-mask from EDEN_NX2_PERF_SAFE (safe), EDEN_NX2_PERF_ON (on) and EDEN_NX2_PERF_OFF (off).
-inline u64 ParseOffMask(bool safe, std::string_view on, std::string_view off) {
-    u64 mask = safe ? DefaultOffMask() : u64{0};
-    while (!on.empty()) {
-        const size_t comma = on.find(',');
-        const std::string_view name = on.substr(0, comma);
-        for (size_t i = 0; i < opt_names.size(); ++i) {
-            if (name == opt_names[i]) {
-                mask &= ~Bit(static_cast<Opt>(i));
-            }
-        }
-        on = comma == std::string_view::npos ? std::string_view{} : on.substr(comma + 1);
-    }
-    while (!off.empty()) {
-        const size_t comma = off.find(',');
-        const std::string_view name = off.substr(0, comma);
+/// The bits of the switches a comma-separated list names. An unknown name warns when variable
+/// gives the environment variable the list came from.
+inline u64 NamesMask(std::string_view list, const char* variable) {
+    u64 mask = 0;
+    while (!list.empty()) {
+        const size_t comma = list.find(',');
+        const std::string_view name = list.substr(0, comma);
         bool known = false;
         for (size_t i = 0; i < opt_names.size(); ++i) {
             if (name == opt_names[i]) {
@@ -189,12 +181,32 @@ inline u64 ParseOffMask(bool safe, std::string_view on, std::string_view off) {
                 known = true;
             }
         }
-        if (!known && !name.empty()) {
-            LOG_WARNING(HW_GPU, "Nx2Perf: unknown name {} in EDEN_NX2_PERF_OFF", name);
+        if (!known && !name.empty() && variable != nullptr) {
+            LOG_WARNING(HW_GPU, "Nx2Perf: unknown name {} in {}", name, variable);
         }
-        off = comma == std::string_view::npos ? std::string_view{} : off.substr(comma + 1);
+        list = comma == std::string_view::npos ? std::string_view{} : list.substr(comma + 1);
     }
     return mask;
+}
+
+/// The off-mask from EDEN_NX2_PERF_SAFE (safe), EDEN_NX2_PERF_ON (on) and EDEN_NX2_PERF_OFF (off)
+/// over the switches that are on by default; StartOffMask adds the off-until-named ones.
+inline u64 ParseOffMask(bool safe, std::string_view on, std::string_view off) {
+    u64 mask = safe ? DefaultOffMask() : u64{0};
+    mask &= ~NamesMask(on, nullptr);
+    return mask | NamesMask(off, "EDEN_NX2_PERF_OFF");
+}
+
+/// Off in every mode until EDEN_NX2_PERF_ON names them: switches measured without a gain where
+/// they were written and kept for other titles and hosts.
+inline constexpr u64 OffUntilNamedMask() {
+    return Bit(Opt::WfiDefer);
+}
+
+/// The off-mask in effect at start: ParseOffMask plus the off-until-named switches that
+/// EDEN_NX2_PERF_ON does not name. EDEN_NX2_PERF_OFF wins over EDEN_NX2_PERF_ON, as before.
+inline u64 StartOffMask(bool safe, std::string_view on, std::string_view off) {
+    return ParseOffMask(safe, on, off) | (OffUntilNamedMask() & ~NamesMask(on, nullptr));
 }
 
 inline bool Enabled() {

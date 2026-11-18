@@ -21,7 +21,7 @@ u64 InitOffMask() {
     [[maybe_unused]] static const bool initialized = [] {
         const char* on_list = std::getenv("EDEN_NX2_PERF_ON");
         const char* off_list = std::getenv("EDEN_NX2_PERF_OFF");
-        const u64 mask = ParseOffMask(std::getenv("EDEN_NX2_PERF_SAFE") != nullptr,
+        const u64 mask = StartOffMask(std::getenv("EDEN_NX2_PERF_SAFE") != nullptr,
                                       on_list ? on_list : "", off_list ? off_list : "");
         std::string state;
         for (size_t i = 0; i < opt_names.size(); ++i) {
