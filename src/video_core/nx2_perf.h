@@ -114,6 +114,10 @@ enum class Opt : unsigned {
     /// deferred fragment barrier. Off until named: in an OoT 3D scene on MoltenVK the wait is
     /// followed by a render target change, so the pass end only moved (297 -> 296 a frame)
     WfiDefer,
+    /// A submission wanted while the front waits (submit_while_waited) inside a render pass keeps
+    /// the pass open and moves to the next draw that begins outside a pass, or to a bound of
+    /// draws (about 19 of the ~300 pass ends a frame in an OoT 3D scene on MoltenVK)
+    WaitedSubmitDefer,
     Count,
 };
 
@@ -128,7 +132,7 @@ inline constexpr std::array<std::string_view, static_cast<size_t>(Opt::Count)> o
     "handle_page_cache", "dma_forward", "draw_begin_coalesce", "pending_wake", "diag_draw_lite",
     "shader_build_budget", "compute_rebuild_async", "compute_preload_variants", "stale_target_skip",
     "geometry_consistency", "build_order_priority", "replay_disk_recordings", "upload_skip",
-    "skip_empty_submit", "feedback_depth_readonly", "wfi_defer",
+    "skip_empty_submit", "feedback_depth_readonly", "wfi_defer", "waited_submit_defer",
 };
 
 static_assert(static_cast<size_t>(Opt::Count) <= 64, "the off-mask is 64 bits");
@@ -161,7 +165,8 @@ inline constexpr u64 DefaultOffMask() {
                           Opt::DownloadBatch, Opt::PipelineFastCache, Opt::DrawPreamble,
                           Opt::BindMemo, Opt::SubmitWhileWaited, Opt::DmaForward,
                           Opt::BankOncePerFrame, Opt::DrawBeginCoalesce, Opt::PendingWake,
-                          Opt::DiagDrawLite, Opt::FeedbackDepthReadOnly, Opt::WfiDefer}) {
+                          Opt::DiagDrawLite, Opt::FeedbackDepthReadOnly, Opt::WfiDefer,
+                          Opt::WaitedSubmitDefer}) {
         mask |= Bit(opt);
     }
     return mask;

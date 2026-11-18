@@ -21,6 +21,7 @@
 #include "video_core/ocarina_upscale.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_vulkan/blit_image.h"
+#include "video_core/renderer_vulkan/deferred_submit_state.h"
 #include "video_core/renderer_vulkan/vk_buffer_cache.h"
 #include "video_core/renderer_vulkan/vk_descriptor_buffer.h"
 #include "video_core/renderer_vulkan/vk_descriptor_pool.h"
@@ -197,6 +198,9 @@ private:
     /// Nx2Perf submit_while_waited, at FlushWork's dispatch check: submits the recorded draws
     /// when the front waits for the back or the host GPU has caught up. True when it submitted.
     bool SubmitWhileWaited();
+    /// Nx2Perf waited_submit_defer, at a draw's start: makes the submission SubmitWhileWaited
+    /// deferred when this draw begins outside a pass or the draw bound is reached.
+    void SubmitDeferredAtBoundary();
 
     /// Records the copies of the command list pages the work just recorded wrote and submits, so
     /// the GPU makes them now (BufferCache::Nx2CopyListPages).
@@ -297,6 +301,10 @@ private:
     bool submit_while_waited{};
     u32 submit_waited_draws{64};
     u32 submit_idle_draws{128};
+    /// Nx2Perf waited_submit_defer: the submission deferred inside a pass and the draws it waits
+    /// at most (EDEN_NX2_SUBMIT_DEFER_DRAWS)
+    DeferredSubmitState deferred_submit;
+    u32 submit_defer_draws{32};
     bool mesh_draw{}; ///< the draw being prepared uses a task/mesh pipeline
     /// Fragment output components the dynamic color write mask was last recorded with
     u32 last_color_output_mask{};

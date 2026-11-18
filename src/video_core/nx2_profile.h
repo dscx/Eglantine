@@ -193,6 +193,8 @@ struct ThreadData {
     std::map<std::string, u64> render_target_changes;
     /// Render passes by their RequestRenderpass calls (draws, clears) and target: "[1] from"
     std::map<std::string, u64> render_pass_sizes;
+    /// Waited submissions met inside a pass (AddWaitedSubmit): deferred, and where they went
+    std::map<std::string, u64> waited_submits;
     u64 list_copy_done_ns{}; ///< Command list copies the front waited for: recorded to done
     u64 list_copy_done_count{};
     /// Executable methods the front sent with the value the register held (approximate top 16,
@@ -493,6 +495,14 @@ inline void AddRenderTargetChange(std::string transition, std::string size) {
     }
 }
 
+/// Nx2Perf waited_submit_defer: a waited submission met inside a pass was `what`: deferred, then
+/// made at a pass boundary, at the draw bound, or dropped because something else submitted.
+inline void AddWaitedSubmit(std::string_view what) {
+    if (Enabled()) {
+        ++t_data.waited_submits[std::string{what}];
+    }
+}
+
 /// The front waited for a command list copy recorded at `recorded` (Now; 0 when not profiling)
 /// and it is done now.
 inline void AddListCopyDone(u64 recorded) {
@@ -674,6 +684,9 @@ inline void Report(const char* thread_name = "GPU thread") {
         line += " | render target changes (from -reason-> to):" +
                 top_counts(data.render_target_changes, 16);
         line += " | render passes by draw requests:" + top_counts(data.render_pass_sizes, 16);
+    }
+    if (!data.waited_submits.empty()) {
+        line += " | waited submits inside a pass:" + top_counts(data.waited_submits);
     }
     if (data.list_copy_done_count != 0) {
         line += fmt::format(" | list copy: {:.0f} us from submit to done ({:.0f}/s)",

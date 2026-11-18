@@ -442,9 +442,10 @@ RasterizerVulkan::RasterizerVulkan(Core::Frontend::EmuWindow& emu_window_, Tegra
         };
         submit_waited_draws = draws("EDEN_NX2_SUBMIT_WAITED_DRAWS", 64);
         submit_idle_draws = draws("EDEN_NX2_SUBMIT_IDLE_DRAWS", 128);
+        submit_defer_draws = draws("EDEN_NX2_SUBMIT_DEFER_DRAWS", 32);
         LOG_INFO(Render_Vulkan, "Nx2Perf submit_while_waited: {} draws while the front waits, {} "
-                                "once the GPU is idle",
-                 submit_waited_draws, submit_idle_draws);
+                                "once the GPU is idle, deferred inside a pass for up to {} draws",
+                 submit_waited_draws, submit_idle_draws, submit_defer_draws);
     }
 }
 
@@ -1294,6 +1295,7 @@ void TraceWindowTarget(const Tegra::Engines::Maxwell3D& maxwell3d, Tegra::Memory
 
 void RasterizerVulkan::Draw(bool is_indexed, u32 instance_count) {
     VideoCommon::Nx2Profile::Scope profile_scope{VideoCommon::Nx2Profile::Zone::Draw};
+    SubmitDeferredAtBoundary();
     {
         // A draw's first and count can come from memory a skipped (rejected) compute program
         // should have written. Past 16M vertices they are garbage: building the quad index
@@ -1513,6 +1515,7 @@ void RasterizerVulkan::Draw(bool is_indexed, u32 instance_count) {
 
 void RasterizerVulkan::DrawIndirect() {
     VideoCommon::Nx2Profile::Scope profile_scope{VideoCommon::Nx2Profile::Zone::Draw};
+    SubmitDeferredAtBoundary();
     const auto& params = maxwell3d->draw_manager.indirect_state;
     if (VideoCommon::Nx2Diag::Active()) {
         g_diag_draw = {"indirect", static_cast<u32>(params.max_draw_counts), 0};
@@ -1596,6 +1599,7 @@ void RasterizerVulkan::DrawIndirect() {
 }
 
 void RasterizerVulkan::DrawTexture() {
+    SubmitDeferredAtBoundary();
 
     SCOPE_EXIT {
         gpu.TickWork();
@@ -3087,6 +3091,32 @@ void RasterizerVulkan::FlushWork() {
     draw_counter = 0;
 }
 
+void RasterizerVulkan::SubmitDeferredAtBoundary() {
+    if (!deferred_submit.Pending()) [[likely]] {
+        return;
+    }
+    namespace Profile = VideoCommon::Nx2Profile;
+    using Due = DeferredSubmitState::Due;
+    switch (deferred_submit.Check(scheduler.DrawsSinceSubmit(), scheduler.IsRenderPassActive(),
+                                  submit_defer_draws)) {
+    case Due::Boundary:
+        Profile::AddWaitedSubmit("pass boundary");
+        break;
+    case Due::Bound:
+        Profile::AddWaitedSubmit("bound");
+        break;
+    case Due::Dropped:
+        Profile::AddWaitedSubmit("dropped");
+        return;
+    case Due::No:
+        return;
+    }
+    // Nothing of this draw is recorded yet: a draw boundary, as FlushWork's submissions.
+    Profile::FlushOriginTag tag{Profile::FlushOrigin::Waited};
+    scheduler.Flush();
+    draw_counter = 0;
+}
+
 bool RasterizerVulkan::SubmitWhileWaited() {
     // A command list copy or a fence submitted later waits behind everything recorded since the
     // last submission: the host GPU starts on it now while the front can't use the time, or the
@@ -3101,6 +3131,21 @@ bool RasterizerVulkan::SubmitWhileWaited() {
         origin = Profile::FlushOrigin::GpuIdle;
     } else {
         return false;
+    }
+    if (scheduler.IsRenderPassActive() &&
+        VideoCommon::Nx2Perf::On(VideoCommon::Nx2Perf::Opt::WaitedSubmitDefer)) {
+        // Inside a pass the submission would end it: a tile store and reload on Apple GPUs. The
+        // pass stays open; the next draw that begins outside a pass submits, or the draw bound
+        // (SubmitDeferredAtBoundary).
+        using Due = DeferredSubmitState::Due;
+        if (deferred_submit.Check(draws, true, submit_defer_draws) != Due::Bound) {
+            if (!deferred_submit.Pending()) {
+                deferred_submit.Request(draws);
+                Profile::AddWaitedSubmit("deferred");
+            }
+            return false;
+        }
+        Profile::AddWaitedSubmit("bound");
     }
     Profile::FlushOriginTag tag{origin};
     if (!VideoCommon::Nx2Perf::Verify()) {
