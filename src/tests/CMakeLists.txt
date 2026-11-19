@@ -50,6 +50,7 @@ add_executable(tests
     common/zstd_compression.cpp
     core/core_timing.cpp
     core/font_merge.cpp
+    core/exclusive_monitor_local.cpp
     core/ldn.cpp
     core/internal_network/socket_proxy.cpp
     core/nup_writer.cpp
@@ -127,6 +128,8 @@ add_executable(tests
 create_target_directory_groups(tests)
 
 target_link_libraries(tests PRIVATE common core input_common video_core)
+# The exclusive monitor test uses Dynarmic's interface header; core links it privately.
+target_link_libraries(tests PRIVATE dynarmic::dynarmic)
 
 if (ENABLE_MCP_SERVER)
     target_sources(tests PRIVATE mcp/protocol.cpp)

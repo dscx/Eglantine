@@ -64,6 +64,35 @@ public:
         return result;
     }
 
+    /// Unsafe_IgnoreGlobalMonitor on the callback backends (arm64), the behaviour the x64 inline
+    /// path has under the flag: the reservation is this processor's alone, taken without the
+    /// lock and never clearing the other processors' reservations. The guest load comes before
+    /// the reservation is published; the exclusive store then stands or falls on the
+    /// compare-and-swap in its `op`. Only the owning processor's thread touches its slot here.
+    template<typename T, typename Function>
+    T ReadAndMarkLocal(size_t processor_id, VAddr address, Function op) {
+        static_assert(std::is_trivially_copyable_v<T>);
+        const T value = op();
+        std::memcpy(exclusive_values[processor_id].data(), &value, sizeof(T));
+        exclusive_addresses[processor_id] = address & RESERVATION_GRANULE_MASK;
+        return value;
+    }
+
+    /// The store half of ReadAndMarkLocal: with the processor's reservation on `address`, runs
+    /// `op` with the value loaded then and consumes the reservation; without one, fails.
+    template<typename T, typename Function>
+        requires std::is_trivially_copyable_v<T>
+    bool DoExclusiveOperationLocal(size_t processor_id, VAddr address, Function op) {
+        VAddr& reservation = exclusive_addresses[processor_id];
+        if (reservation != (address & RESERVATION_GRANULE_MASK)) {
+            return false;
+        }
+        reservation = INVALID_EXCLUSIVE_ADDRESS;
+        T saved_value;
+        std::memcpy(&saved_value, exclusive_values[processor_id].data(), sizeof(T));
+        return op(saved_value);
+    }
+
     /// Unmark everything.
     void Clear();
     /// Unmark processor id

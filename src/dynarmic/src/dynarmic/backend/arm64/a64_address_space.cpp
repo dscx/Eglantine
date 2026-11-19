@@ -6,6 +6,8 @@
  * SPDX-License-Identifier: 0BSD
  */
 
+#include <cstdlib>
+
 #include "dynarmic/backend/arm64/a64_address_space.h"
 
 #include "dynarmic/backend/arm64/a64_jitstate.h"
@@ -110,6 +112,14 @@ static void* EmitWrappedReadCallTrampoline(oaknut::CodeGenerator& code, T* this_
     return target;
 }
 
+/// Unsafe_IgnoreGlobalMonitor on this backend: the processor-local reservation without the
+/// monitor's lock (ExclusiveMonitor::ReadAndMarkLocal), as the x64 inline path behaves under the
+/// flag. EDEN_ARM64_GLOBAL_MONITOR=1 keeps the locked global monitor under the flag, to compare.
+static bool UseLocalReservation(const A64::UserConfig& conf) {
+    static const bool keep_global = std::getenv("EDEN_ARM64_GLOBAL_MONITOR") != nullptr;
+    return !keep_global && conf.HasOptimization(OptimizationFlag::Unsafe_IgnoreGlobalMonitor);
+}
+
 template<auto callback, typename T>
 static void* EmitExclusiveReadCallTrampoline(oaknut::CodeGenerator& code, const A64::UserConfig& conf) {
     using namespace oaknut::util;
@@ -117,9 +127,13 @@ static void* EmitExclusiveReadCallTrampoline(oaknut::CodeGenerator& code, const 
     oaknut::Label l_addr, l_this;
 
     auto fn = [](const A64::UserConfig& conf, A64::VAddr vaddr) -> T {
-        return conf.global_monitor->ReadAndMark<T>(conf.processor_id, vaddr, [&]() -> T {
-            return (conf.callbacks->*callback)(vaddr, sizeof(T));
-        });
+        const auto read = [&]() -> T { return (conf.callbacks->*callback)(vaddr, sizeof(T)); };
+        // Unsafe_IgnoreGlobalMonitor: as the x64 inline path, no lock and no cross-core clear
+        // (Ocarina of Time's six cores spent half their running time on the monitor's lock).
+        if (UseLocalReservation(conf)) {
+            return conf.global_monitor->ReadAndMarkLocal<T>(conf.processor_id, vaddr, read);
+        }
+        return conf.global_monitor->ReadAndMark<T>(conf.processor_id, vaddr, read);
     };
 
     void* target = code.xptr<void*>();
@@ -172,9 +186,13 @@ static void* EmitExclusiveWriteCallTrampoline(oaknut::CodeGenerator& code, const
 
     oaknut::Label l_addr, l_this;
     auto fn = [](const A64::UserConfig& conf, A64::VAddr vaddr, T value) -> u32 {
-        return conf.global_monitor->DoExclusiveOperation<T>(conf.processor_id, vaddr, [&](T expected) -> bool {
+        const auto store = [&](T expected) -> bool {
             return (conf.callbacks->*callback)(vaddr, value, expected);
-        }) ? 0 : 1;
+        };
+        if (UseLocalReservation(conf)) {
+            return conf.global_monitor->DoExclusiveOperationLocal<T>(conf.processor_id, vaddr, store) ? 0 : 1;
+        }
+        return conf.global_monitor->DoExclusiveOperation<T>(conf.processor_id, vaddr, store) ? 0 : 1;
     };
 
     void* target = code.xptr<void*>();
@@ -252,9 +270,11 @@ static void* EmitExclusiveRead128CallTrampoline(oaknut::CodeGenerator& code, con
     oaknut::Label l_addr, l_this;
 
     auto fn = [](const A64::UserConfig& conf, A64::VAddr vaddr) -> Vector {
-        return conf.global_monitor->ReadAndMark<Vector>(conf.processor_id, vaddr, [&]() -> Vector {
-            return conf.callbacks->MemoryRead128(vaddr);
-        });
+        const auto read = [&]() -> Vector { return conf.callbacks->MemoryRead128(vaddr); };
+        if (UseLocalReservation(conf)) {
+            return conf.global_monitor->ReadAndMarkLocal<Vector>(conf.processor_id, vaddr, read);
+        }
+        return conf.global_monitor->ReadAndMark<Vector>(conf.processor_id, vaddr, read);
     };
 
     void* target = code.xptr<void*>();
@@ -334,12 +354,13 @@ static void* EmitExclusiveWrite128CallTrampoline(oaknut::CodeGenerator& code, co
     oaknut::Label l_addr, l_this;
 
     auto fn = [](const A64::UserConfig& conf, A64::VAddr vaddr, Vector value) -> u32 {
-        return conf.global_monitor->DoExclusiveOperation<Vector>(conf.processor_id, vaddr,
-                                                                 [&](Vector expected) -> bool {
-                                                                     return conf.callbacks->MemoryWriteExclusive128(vaddr, value, expected);
-                                                                 })
-                 ? 0
-                 : 1;
+        const auto store = [&](Vector expected) -> bool {
+            return conf.callbacks->MemoryWriteExclusive128(vaddr, value, expected);
+        };
+        if (UseLocalReservation(conf)) {
+            return conf.global_monitor->DoExclusiveOperationLocal<Vector>(conf.processor_id, vaddr, store) ? 0 : 1;
+        }
+        return conf.global_monitor->DoExclusiveOperation<Vector>(conf.processor_id, vaddr, store) ? 0 : 1;
     };
 
     void* target = code.xptr<void*>();
