@@ -32,6 +32,8 @@
 #include "video_core/macro_dma_forward.h"
 #ifdef ARCHITECTURE_x86_64
 #include "video_core/macro_turing_jit.h"
+#elif defined(ARCHITECTURE_arm64)
+#include "video_core/macro_turing_jit_a64.h"
 #endif
 
 namespace Tegra::Engines {
@@ -1861,7 +1863,7 @@ void Maxwell3D::FrontCallMultiMethod(Core::System& system, VideoCommon::GpuSplit
 
 void Maxwell3D::FrontRunMacro(Core::System& system, VideoCommon::GpuSplit& split,
                               FrontState& fs, std::span<const u32> borrowed) {
-#ifdef ARCHITECTURE_x86_64
+#if defined(ARCHITECTURE_x86_64) || defined(ARCHITECTURE_arm64)
     namespace Profile = VideoCommon::Nx2Profile;
     const u32 method = fs.executing_macro;
     fs.executing_macro = 0;

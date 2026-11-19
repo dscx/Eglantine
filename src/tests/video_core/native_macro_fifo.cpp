@@ -6,8 +6,14 @@
 #include <vector>
 #include <catch2/catch_test_macros.hpp>
 
+#include "common/common_types.h"
+
+#if defined(ARCHITECTURE_x86_64) || defined(ARCHITECTURE_arm64)
 #ifdef ARCHITECTURE_x86_64
 #include "video_core/macro_turing_jit.h"
+#else
+#include "video_core/macro_turing_jit_a64.h"
+#endif
 
 namespace {
 std::array<u32, 3> FifoInstruction(u32 method, bool end) {

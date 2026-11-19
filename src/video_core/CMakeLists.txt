@@ -97,6 +97,7 @@ add_library(video_core STATIC
     macro.h
     macro_memo.h
     macro_turing.h
+    macro_turing_jit_a64.h
     fence_manager.h
     gpu.cpp
     gpu.h
@@ -533,6 +534,11 @@ endif()
 
 if (ARCHITECTURE_x86_64)
     target_link_libraries(video_core PUBLIC xbyak::xbyak)
+endif()
+
+if (ARCHITECTURE_arm64)
+    # macro_turing_jit_a64.h emits AArch64 code with oaknut (Dynarmic's assembler).
+    target_link_libraries(video_core PUBLIC merry::oaknut)
 endif()
 
 if (ARCHITECTURE_x86_64 OR ARCHITECTURE_arm64)
